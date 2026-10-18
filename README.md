@@ -7,6 +7,8 @@
 ## 设计文档
 
 - [YAML 批处理服务设计 v0.2](docs/design/flink-yaml-batch-service-design.md)：模块职责、YAML 规范、执行流程、失败恢复协议、P0–P5 实施计划及 33 项验收用例。
-- [P0 实施任务与验收计划](docs/superpowers/plans/2026-10-18-p0-baseline-and-file-commit-validation.md)：版本选型、8 个实施任务、文件提交协议的 13 个实验及进入 P1 的门槛；当前仅完成计划，尚未实施。
+- [P0 实施任务与验收计划](docs/superpowers/plans/2026-10-18-p0-baseline-and-file-commit-validation.md)：版本选型、8 个实施任务、文件提交协议的 13 个实验及进入 P1 的门槛；T01/T02 已完成只读盘点，尚未通过任务验收，实验均未运行。
+- [T01 环境检查与最小补齐方案](docs/p0/environment-and-fixtures.md)：现有环境、缺失项、共享资源保护边界及固定数据的待验收要求。
+- [T02 候选版本与制品检查](docs/p0/version-lock.md)：本机版本、制品校验差异、依赖缺口及优先复用方案；版本尚未冻结。
 
 文档中的协议和验收条件属于设计约定，具体实现与运行能力仍需后续验证。
