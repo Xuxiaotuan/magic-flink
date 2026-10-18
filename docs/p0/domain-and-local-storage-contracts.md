@@ -98,3 +98,6 @@ Schema 只允许已支持的精确标量类型，拒绝浮点和复杂嵌套类�
 这批验收证明领域关系、实际本地不可变元数据 I/O 及本地竞争语义；不证明文件内容实际通过 Parquet 扫描、源数据一致、原生 committable 可闭合、数据库 SEALED/CAS、首次发布、资源扣还或 F01–F13 运行 PASS。P0 总体仍为 evidence_incomplete，环境准入状态不因本批代码改变。
 
 最终验证：2026-10-18 17:04:17（Asia/Shanghai），使用已有 Java 17.0.14 与 Maven 3.9.16 执行 `mvn -o package`，退出码 0，**170 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS**。命令及堆配置沿用 [平台合同](platform-contracts.md)第 5、8 节；原始日志在忽略目录 `target/t04-final-package.log`。普通应用 JAR 含 97 个应用 class，不含 Flink/Calcite/测试类，尚不是 T05 fat JAR。Markdown 本地链接与 `git diff --check` 通过，设计 v0.2 摘要保持不变。本批没有安装、部署、暂存、提交或推送。
+
+
+后续补充：本页记录第三批的本地领域与对象存储交付。元数据库 CAS、首次发布与取消授权的后续实现及 H2 验证见 [事务合同](transactions-and-publication-contracts.md)；真实 PostgreSQL、原生 Flink/S3 和完整业务链路仍须各自验收。

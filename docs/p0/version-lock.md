@@ -130,3 +130,10 @@ T03 固定 Flink 源码 commit 和接口范围见[源码核对](file-commit-prot
 ## 8. T04 领域与本地存储构建补充
 
 本批没有新增依赖或修改 POM，复用 Java 17.0.14、Maven 3.9.16、SnakeYAML 2.6 与 provided Flink Planner 1.20.5，全部使用 offline 编译/测试/package。安全元数据解码使用既有 SnakeYAML SafeConstructor 加规范字节复核；本地存储仅使用 JDK NIO。测试增加两个各 64 MiB、1 CPU 的短生命周期 JVM 验证真实本地争写，不启动外部服务。170 项本地测试的具体证据见 [T04 合同](domain-and-local-storage-contracts.md)；这不是新的运行发行冻结或扫描通过。
+
+
+## 9. JDBC 事务测试依赖
+
+本批仅新增 `com.h2database:h2:2.4.240`，scope=test，复用已有本机缓存；所有编译、测试和 package 均 `mvn -o`，没有安装或部署。JAR SHA-256 为 `29b70e427cc1c40cdc376283adbb0cc62853073797bb5fe5761f81fe73d57ce0`，与 [Central SHA-1](https://repo.maven.apache.org/maven2/com/h2database/h2/2.4.240/h2-2.4.240.jar.sha1) 对照均为 `686180ad33981ad943fdc0ab381e619b2c2fdfe5`。这只是来源对照，不是漏洞扫描或行内准入。
+
+H2 无新增传递依赖，不进入普通应用 JAR。使用 PostgreSQL compatibility mode 的本地文件数据库测试 JDBC 事务；[H2 官方功能说明](https://h2database.github.io/html/features.html)列明仅兼容部分 PostgreSQL 行为。生产侧不依赖 H2，也没有新增 pgJDBC 或变更既有 PostgreSQL 版本候选；PostgreSQL 驱动、DataSource、实际锁语义、DDL 准入和扫描仍归 T02/T05/T08 与 F12。详细证据见 [事务合同](transactions-and-publication-contracts.md)。

@@ -1,6 +1,6 @@
 # 本地核心合同与验证记录
 
-2026-10-18，依据设计 v0.2 和 P0 T03/T04。已完成 T03 静态核对、YAML 与恢复判定；后续新增本地 SQL Planner、对象摘要，以及本批领域校验/交叉核验/本地存储。**这是 T04 的部分实现及 P1 的部分前置逻辑，不是完整 P0 或完整服务。**
+2026-10-18，依据设计 v0.2 和 P0 T03/T04。已完成 T03 静态核对、YAML 与恢复判定；后续新增本地 SQL Planner、对象摘要，领域校验/交叉核验/本地存储，以及本批 JDBC CAS/首次发布/取消授权协议。**这是 T04 的部分实现及 P1 的部分前置逻辑，不是完整 P0 或完整服务。**
 
 ## 1. 已实现的代码
 
@@ -17,6 +17,9 @@
 | [FileStageProtocol](../../src/main/java/io/github/xuxiaotuan/magicflink/protocol/FileStageProtocol.java) | 计划/原生接纳集合/提交/分片/终态/清单关系 | 上游须实际生产可信事实，不代替原生适配或 SEALED 事务 |
 | [DomainSnapshots](../../src/main/java/io/github/xuxiaotuan/magicflink/protocol/DomainSnapshots.java) | domain-v2 完整领域载荷与摘要 | 保留 canonical-v1，详细编码见 T04 合同 |
 | [LocalImmutableObjectStore](../../src/main/java/io/github/xuxiaotuan/magicflink/connectors/LocalImmutableObjectStore.java) | 本地不可变元数据写入、核验读取和重开 | 专属 POSIX 目录；不是 S3、Parquet 或数据库适配器 |
+| [TransactionContracts](../../src/main/java/io/github/xuxiaotuan/magicflink/control/TransactionContracts.java) | 固定业务键、发布/检查身份、授权与回执字段 | 内部 DTO 不证明真实检查或持久授权 |
+| [JdbcRunStore](../../src/main/java/io/github/xuxiaotuan/magicflink/connectors/JdbcRunStore.java) | 元数据库行锁/CAS、封存、检查、取消、授权、发布成功补记 | JDBC 已实现，H2 文件数据库通过；PostgreSQL/完整协调器待验收 |
+| [JdbcPublicationStore](../../src/main/java/io/github/xuxiaotuan/magicflink/connectors/JdbcPublicationStore.java) | 首次指针/CAS/历史同事务，原 ID 幂等及一致快照观察 | 不包含数据 Writer、目标封存或正式视图 |
 | [SealRecovery](../../src/main/java/io/github/xuxiaotuan/magicflink/control/SealRecovery.java) | 从持久终态、证据、文件核验和封存观察选择下一步 | 不生成真实 CommitEvidence，不读写文件或数据库 |
 
 采用单 Maven 工程，同版普通 Flink Planner 为 provided 依赖；未引入 Web 框架、调度器、仓储抽象、内存数据库、插件体系；测试仅额外启动受限测试 JVM 验证本地跨进程争写。未来 Service/Runner 仍进入同一工程与统一测试扫描的 fat JAR，不接受用户 JAR。
@@ -109,7 +112,7 @@ MAVEN_OPTS='-Xmx256m -XX:ActiveProcessorCount=2' \
 
 ## 6. 尚未完成的验收
 
-- T04 的真实配置能力核实、S3 条件写/读取语义、事务 CAS、首次发布唯一键初始化/历史去重及数据库并发验证。本批已补齐 P0 PostgreSQL 领域字段、交叉核验和本地原子不可变元数据存储，详见第 8 节。
+- T04 的真实配置能力核实、S3 条件写/读取语义、PostgreSQL CAS、首次发布唯一键初始化/历史去重及真实数据库并发/故障验证。本批已补齐 P0 PostgreSQL 领域字段、交叉核验和本地原子不可变元数据存储，详见第 8 节。
 - T05 的双入口、真实 Flink/Planner/JDBC/Parquet/S3 依赖闭包、fat JAR、SBOM/扫描及固定镜像。
 - T06/T07 的合法文件集合、失败 task 排除、零行、多文件、内容核验、真实存储故障和 F01–F13。
 - P1 的服务受理、权限、完整检查 Schema/运行能力受理、协调器及持久化；四源采集和业务 Join 仍按原阶段推进。
@@ -126,7 +129,7 @@ MAVEN_OPTS='-Xmx256m -XX:ActiveProcessorCount=2' \
 测试复用现有工具；普通 Planner 依赖经 Maven 正常解析，后续支持离线构建。测试堆上限调整为 384 MiB、单 fork、2 个处理器，Maven 上限仍为 256 MiB；未启动集群/数据库、未安装/部署，未提交或推送。
 
 
-## 8. 第三批：T04 领域与本地存储（当前，170 项）
+## 8. 第三批：T04 领域与本地存储（历史，170 项）
 
 详见 [T04 领域与本地存储合同](domain-and-local-storage-contracts.md)。新增 PlatformDefinitions、ResolvedRun、FileStageProtocol、DomainSnapshots、ObjectKeys、LocalImmutableObjectStore，补齐 P0 PostgreSQL 全部本批字段、明确版本/权限/预算、绑定值/检查 Schema/Planner 校验、完整预期 writer/split 与原生接纳提交集合核对。成功清单还须匹配持久终态与逐文件核验引用；COMPUTE 不能漏输入或读取其他运行目录。
 
@@ -135,3 +138,12 @@ MAVEN_OPTS='-Xmx256m -XX:ActiveProcessorCount=2' \
 新增 44 项，加原有 126 项，共 170 项。构建命令沿用第 5 节，Surefire 单 fork/384 MiB/2 CPU，跨进程测试的两个子 JVM 各 64 MiB/1 CPU。最终 package 证据登记在详细合同中。未新增依赖或改变 POM，未安装、部署、暂存、提交或推送。
 
 本批是本地合同和元数据 I/O 验收；真实 Source/FileSink/Parquet/S3、元数据库事务和目标发布仍 evidence_incomplete。登记权限、源端不可变声明及类型化事实不是运行证明；不会仅靠构造器生成 SEALED 资格或将 receipt 直接推进运行。
+
+
+## 9. 第四批：JDBC CAS 与首次发布（当前，201 项）
+
+已实现元数据库的 run 行锁/revision CAS、精确当前尝试、SEALED/阶段完成/唯一下一意图同事务提交，以及固定规则/候选/load 的检查接纳。取消与发布授权在同一 run 事务中串行化；授权后取消过晚，保存原意图继续核对。目标侧首次指针初始化、revision CAS 与唯一历史同事务，支持同 ID 并发和响应丢失恢复。已确认的目标历史可在元数据库补记成功，后续版本推进不抹去本次历史事实。
+
+详见 [T04 事务与首次发布合同](transactions-and-publication-contracts.md)。新增 31 项，原有 170 项全部回归；本地临时 H2 文件数据库实际执行 SQL/锁/提交/回滚和重开，不访问既有环境。生产代码仅使用 JDBC API，H2 2.4.240 仅为缓存中的 test dependency；未安装或部署。元数据和目标 DataSource 分离，没有跨库事务，也没有自动 DDL 或安装脚本。
+
+运行协议和 H2 验证不能升级为 PostgreSQL、完整阶段协调、目标数据写入/逐字段回读、正式视图或 P0 通过。完整尝试历史/替换、停止确认与 CANCELLED、下一计划派发和资源预留仍未实现；F12 保持 NOT_RUN。
