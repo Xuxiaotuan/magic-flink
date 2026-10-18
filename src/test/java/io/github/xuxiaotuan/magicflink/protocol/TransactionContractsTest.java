@@ -40,8 +40,8 @@ class TransactionContractsTest {
     }
     @Test void targetAuthorizationCannotHaveNoRulesOrMixedRunIdentity() {
         var original=readyRegistration();
-        assertThrows(IllegalArgumentException.class,()->new Registration(original.runId(),original.resolvedSpecDigest(),original.phase(),original.stages(),original.publication(),Map.of(),original.deadline()));
-        assertThrows(IllegalArgumentException.class,()->new Registration("another_run",original.resolvedSpecDigest(),original.phase(),original.stages(),original.publication(),original.requiredChecks(),original.deadline()));
+        assertThrows(IllegalArgumentException.class,()->new Registration(original.runId(),original.resolvedSpecDigest(),original.phase(),original.stages(),original.publication(),Map.of(),original.deadline(),original.retryPolicy(),original.timeLimits()));
+        assertThrows(IllegalArgumentException.class,()->new Registration("another_run",original.resolvedSpecDigest(),original.phase(),original.stages(),original.publication(),original.requiredChecks(),original.deadline(),original.retryPolicy(),original.timeLimits()));
         assertThrows(IllegalArgumentException.class,()->new PublicationReceipt(new PublicationRequest("pub1","run1",KEY,"load1",HASH,0),Optional.empty(),2,CLOCK.instant()));
     }
 }

@@ -116,3 +116,6 @@ commit 返回异常时，事务可能已经提交。JdbcTransactions 会尝试 r
 SQL 文件不会自动执行；本轮仅由测试装载到专属临时 H2 文件。没有修改既有数据库，未安装、部署、暂存、提交或推送。
 
 最终构建：2026-10-18 17:26:12（Asia/Shanghai），沿用既有 Java/Maven/堆限制执行 `mvn -o package`，退出码 0，**201 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS**；原始日志在忽略目录 `target/t04-transaction-package.log`。普通 JAR 含 118 个应用 class 和两份 SQL 资源，不含 Flink/Calcite/H2/测试类。Markdown 本地链接和 `git diff --check` 通过，v0.2 设计 SHA-256 仍为 `fff41e1fbe958dbec7c1490c2a76633dc72d60ea9077957771c4c042f8818291`。既有 Calcite 可选注解和 SLF4J NOP 警告仍在，不影响本次构建；发行版日志/依赖闭包仍须 T05 验证。
+
+
+后续补充：本页为第四批历史。当前尝试历史/安全切换、停止确认、CANCELLED 资格和下一阶段意图的持久恢复已按 [第五批合同](attempt-history-and-recovery-contracts.md)实现并本地验证；真实外部执行器 fencing/停止、PostgreSQL 故障和完整 Service 仍未验收。Registration 新增必填 RetryPolicy/TimeLimits，元数据建表合同相应更新，未对既有数据库执行迁移。

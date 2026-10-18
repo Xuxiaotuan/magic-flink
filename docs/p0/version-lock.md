@@ -137,3 +137,8 @@ T03 固定 Flink 源码 commit 和接口范围见[源码核对](file-commit-prot
 本批仅新增 `com.h2database:h2:2.4.240`，scope=test，复用已有本机缓存；所有编译、测试和 package 均 `mvn -o`，没有安装或部署。JAR SHA-256 为 `29b70e427cc1c40cdc376283adbb0cc62853073797bb5fe5761f81fe73d57ce0`，与 [Central SHA-1](https://repo.maven.apache.org/maven2/com/h2database/h2/2.4.240/h2-2.4.240.jar.sha1) 对照均为 `686180ad33981ad943fdc0ab381e619b2c2fdfe5`。这只是来源对照，不是漏洞扫描或行内准入。
 
 H2 无新增传递依赖，不进入普通应用 JAR。使用 PostgreSQL compatibility mode 的本地文件数据库测试 JDBC 事务；[H2 官方功能说明](https://h2database.github.io/html/features.html)列明仅兼容部分 PostgreSQL 行为。生产侧不依赖 H2，也没有新增 pgJDBC 或变更既有 PostgreSQL 版本候选；PostgreSQL 驱动、DataSource、实际锁语义、DDL 准入和扫描仍归 T02/T05/T08 与 F12。详细证据见 [事务合同](transactions-and-publication-contracts.md)。
+
+
+## 10. 尝试历史与恢复构建补充
+
+本批没有增加依赖或修改 POM，继续使用现有 Java 17.0.14、Maven 3.9.16、provided Flink 1.20.5、SnakeYAML 2.6 和仅 test scope 的 H2 2.4.240；构建/测试/package 全部 offline。表结构只在 JUnit 专属临时数据库装载，未连接、安装或部署既有数据库。恢复测试复用不可变域 fixture，避免重复运行无关 Planner；没有以缓存结果替代 JDBC 事务。具体证据见 [尝试历史与恢复合同](attempt-history-and-recovery-contracts.md)，不变更 T02/T05/T08 的版本准入/扫描要求。

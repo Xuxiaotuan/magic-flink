@@ -24,7 +24,7 @@ class JdbcRunStoreTest {
     }
     static Registration readyRegistration() {
         return new Registration("run1", plan().resolvedSpecDigest(), Phase.RECONCILING_TARGET, List.of(checkIdentity()),
-                Optional.of(BASIS), Map.of("row_compare", HASH, "version_identity", READ_HASH), START.plusSeconds(1800));
+                Optional.of(BASIS), Map.of("row_compare", HASH, "version_identity", READ_HASH), START.plusSeconds(1800),PlatformDefinitionsTest.runtime().retry(),PlatformDefinitionsTest.runtime().time());
     }
     static CheckProof proof(String id, CheckStatus status) {
         return new CheckProof(checkIdentity(), id, id.equals("row_compare") ? HASH : READ_HASH, BASIS.candidateDigest(), BASIS.loadId(), status,
@@ -37,7 +37,7 @@ class JdbcRunStoreTest {
     }
     @Test void sealsManifestStageAndUniqueNextIntentInOneTransactionAndReopens() throws Exception {
         var ds = database(directory.resolve("metadata")); schema(ds,"/db/metadata.sql"); var store = new JdbcRunStore(ds,3,CLOCK);
-        store.create(new Registration("run1",plan().resolvedSpecDigest(),Phase.COLLECTING,List.of(identity(plan())),Optional.empty(),Map.of(),START.plusSeconds(1800)));
+        store.create(new Registration("run1",plan().resolvedSpecDigest(),Phase.COLLECTING,List.of(identity(plan())),Optional.empty(),Map.of(),START.plusSeconds(1800),PlatformDefinitionsTest.runtime().retry(),PlatformDefinitionsTest.runtime().time()));
         assertEquals(Decision.APPLIED,store.sealFile(0,manifest()));
         var recovered = new JdbcRunStore(database(directory.resolve("metadata")),3,CLOCK);
         assertEquals(Phase.PRECHECKING,recovered.read("run1").phase());
@@ -47,7 +47,7 @@ class JdbcRunStoreTest {
     }
     @Test void staleRevisionRequiresRereadAndCancellationArchivesLateManifest() throws Exception {
         var ds=database(directory.resolve("metadata"));schema(ds,"/db/metadata.sql");var store=new JdbcRunStore(ds,3,CLOCK);
-        store.create(new Registration("run1",plan().resolvedSpecDigest(),Phase.COLLECTING,List.of(identity(plan())),Optional.empty(),Map.of(),START.plusSeconds(1800)));
+        store.create(new Registration("run1",plan().resolvedSpecDigest(),Phase.COLLECTING,List.of(identity(plan())),Optional.empty(),Map.of(),START.plusSeconds(1800),PlatformDefinitionsTest.runtime().retry(),PlatformDefinitionsTest.runtime().time()));
         assertEquals(Decision.REREAD,store.sealFile(2,manifest()));
         assertEquals(Decision.CANCEL_REQUESTED,store.cancel("run1",0));
         assertEquals(Decision.ARCHIVE_ONLY,store.sealFile(1,manifest()));
@@ -56,7 +56,7 @@ class JdbcRunStoreTest {
     }
     @Test void failureCreatingNextIntentRollsBackSealAndStageCompletion() throws Exception {
         var ds=database(directory.resolve("metadata"));schema(ds,"/db/metadata.sql");var store=new JdbcRunStore(ds,3,CLOCK);
-        store.create(new Registration("run1",plan().resolvedSpecDigest(),Phase.COLLECTING,List.of(identity(plan())),Optional.empty(),Map.of(),START.plusSeconds(1800)));
+        store.create(new Registration("run1",plan().resolvedSpecDigest(),Phase.COLLECTING,List.of(identity(plan())),Optional.empty(),Map.of(),START.plusSeconds(1800),PlatformDefinitionsTest.runtime().retry(),PlatformDefinitionsTest.runtime().time()));
         sql(ds,"ALTER TABLE mf_next_intent ADD CONSTRAINT reject_next CHECK (stage_type <> 'PRECHECK')");
         assertThrows(SQLException.class,()->store.sealFile(0,manifest()));
         assertEquals(0,store.read("run1").revision());assertEquals(Phase.COLLECTING,store.read("run1").phase());assertEquals(0,count(ds,"mf_manifest"));
@@ -117,12 +117,12 @@ class JdbcRunStoreTest {
     @Test void expiredUnsealedFilesCannotCreateNextIntent() throws Exception {
         var ds=database(directory.resolve("metadata"));schema(ds,"/db/metadata.sql");
         var store=new JdbcRunStore(ds,3,Clock.fixed(manifest().commit().plan().retainUntil().plusSeconds(1),ZoneOffset.UTC));
-        store.create(new Registration("run1",plan().resolvedSpecDigest(),Phase.COLLECTING,List.of(identity(plan())),Optional.empty(),Map.of(),START.plusSeconds(1800)));
+        store.create(new Registration("run1",plan().resolvedSpecDigest(),Phase.COLLECTING,List.of(identity(plan())),Optional.empty(),Map.of(),START.plusSeconds(1800),PlatformDefinitionsTest.runtime().retry(),PlatformDefinitionsTest.runtime().time()));
         assertEquals(Decision.NOT_READY,store.sealFile(0,manifest()));assertEquals(0,count(ds,"mf_manifest"));assertEquals(0,count(ds,"mf_next_intent"));
     }
     @Test void currentAttemptCanBeRecoveredWithAllExternalAndPlanIdentityFields() throws Exception {
         var ds=database(directory.resolve("metadata"));schema(ds,"/db/metadata.sql");var store=new JdbcRunStore(ds,3,CLOCK);
-        var identity=identity(plan());store.create(new Registration("run1",plan().resolvedSpecDigest(),Phase.COLLECTING,List.of(identity),Optional.empty(),Map.of(),START.plusSeconds(1800)));
+        var identity=identity(plan());store.create(new Registration("run1",plan().resolvedSpecDigest(),Phase.COLLECTING,List.of(identity),Optional.empty(),Map.of(),START.plusSeconds(1800),PlatformDefinitionsTest.runtime().retry(),PlatformDefinitionsTest.runtime().time()));
         assertEquals(List.of(identity),new JdbcRunStore(database(directory.resolve("metadata")),3,CLOCK).currentStages("run1"));
         var changed=new StageIdentity(identity.stage(),"old_attempt",identity.executor(),identity.resource(),identity.planDigest(),identity.resolvedSpecDigest(),identity.consumedDataDigest());
         sql(ds,"UPDATE mf_stage SET identity_digest=? WHERE run_id='run1'",io.github.xuxiaotuan.magicflink.control.TransactionContracts.identityDigest(changed));
@@ -143,7 +143,7 @@ class JdbcRunStoreTest {
     @Test void twoInputCompletionsUseRereadWithoutTreatingTheOtherInputAsStale() throws Exception {
         var run=resolved(true);var orders=collectManifest("orders",run);var customers=collectManifest("customers",run);
         var ds=database(directory.resolve("metadata"));schema(ds,"/db/metadata.sql");var store=new JdbcRunStore(ds,3,CLOCK);
-        store.create(new Registration("run1",DomainSnapshots.run(run).sha256(),Phase.COLLECTING,List.of(orders.commit().evidence().identity(),customers.commit().evidence().identity()),Optional.empty(),Map.of(),START.plusSeconds(1800)));
+        store.create(new Registration("run1",DomainSnapshots.run(run).sha256(),Phase.COLLECTING,List.of(orders.commit().evidence().identity(),customers.commit().evidence().identity()),Optional.empty(),Map.of(),START.plusSeconds(1800),PlatformDefinitionsTest.runtime().retry(),PlatformDefinitionsTest.runtime().time()));
         var outcomes=race(()->store.sealFile(0,orders),()->new JdbcRunStore(ds,3,CLOCK).sealFile(0,customers));
         assertEquals(1,outcomes.stream().filter(d->d==Decision.APPLIED).count());assertEquals(1,outcomes.stream().filter(d->d==Decision.REREAD).count());
         assertEquals(Phase.COLLECTING,store.read("run1").phase());assertEquals(0,count(ds,"mf_next_intent"));
@@ -184,7 +184,7 @@ class JdbcRunStoreTest {
         var ds=database(directory.resolve("metadata"));schema(ds,"/db/metadata.sql");var store=new JdbcRunStore(ds,3,CLOCK);store.create(readyRegistration());
         store.recordCheck(0,proof("row_compare",CheckStatus.PASS));store.recordCheck(1,proof("version_identity",CheckStatus.PASS));store.authorize("run1",2,"pub1");
         var previous=checkIdentity();var other=new StageIdentity(new StageIdentity.StageKey("run2",StageIdentity.StageType.TARGET_CHECK,Optional.empty()),"check2",previous.executor(),previous.resource(),HASH,"c".repeat(64),READ_HASH);
-        store.create(new Registration("run2",other.resolvedSpecDigest(),Phase.RECONCILING_TARGET,List.of(other),Optional.of(BASIS),Map.of("row_compare",HASH),START.plusSeconds(1800)));
+        store.create(new Registration("run2",other.resolvedSpecDigest(),Phase.RECONCILING_TARGET,List.of(other),Optional.of(BASIS),Map.of("row_compare",HASH),START.plusSeconds(1800),PlatformDefinitionsTest.runtime().retry(),PlatformDefinitionsTest.runtime().time()));
         store.recordCheck(0,new CheckProof(other,"row_compare",HASH,HASH,"load1",CheckStatus.PASS,java.net.URI.create("s3://test-bucket/magic/runs/run2/checks/check2/report.json"),HASH));
         assertEquals(Decision.CONFLICT,store.authorize("run2",1,"pub1"));
         assertTrue(store.intent("run2").isEmpty());assertEquals(Phase.RECONCILING_TARGET,store.read("run2").phase());assertEquals(1,store.read("run2").revision());

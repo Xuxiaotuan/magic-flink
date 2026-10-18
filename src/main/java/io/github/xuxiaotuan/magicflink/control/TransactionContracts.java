@@ -12,8 +12,8 @@ import java.util.*;
 /** Platform-internal transaction inputs; persisted evidence must be verified before calling the JDBC adapters. */
 public final class TransactionContracts {
     private TransactionContracts() {}
-    public enum Phase { COLLECTING, PRECHECKING, COMPUTING, VALIDATING_RESULT, WRITING, RECONCILING_TARGET, PUBLISHING, CANCEL_REQUESTED, SUCCEEDED }
-    public enum Decision { APPLIED, ALREADY_APPLIED, REREAD, ARCHIVE_ONLY, CONFLICT, NOT_READY, CANCEL_REQUESTED, CANCEL_TOO_LATE }
+    public enum Phase { COLLECTING, PRECHECKING, COMPUTING, VALIDATING_RESULT, WRITING, RECONCILING_TARGET, PUBLISHING, CANCEL_REQUESTED, SUCCEEDED, CANCELLED }
+    public enum Decision { APPLIED, ALREADY_APPLIED, REREAD, ARCHIVE_ONLY, CONFLICT, NOT_READY, CANCEL_REQUESTED, CANCEL_TOO_LATE, WAIT_STOP }
     public enum CheckStatus { PASS, FAIL, ERROR, SKIPPED }
     public record BusinessKey(String tenant, String canonicalTarget, ParameterType batchType, Object batch) {
         public BusinessKey {
@@ -52,16 +52,16 @@ public final class TransactionContracts {
     public static final class PublicationConflictException extends java.sql.SQLException {
         public PublicationConflictException(){super("publication identity, accepted version or revision conflict","MF001");}
     }
-    public record Registration(String runId,String resolvedSpecDigest,Phase phase,List<StageIdentity> stages,Optional<PublicationBasis> publication,Map<String,String> requiredChecks,Instant deadline) {
+    public record Registration(String runId,String resolvedSpecDigest,Phase phase,List<StageIdentity> stages,Optional<PublicationBasis> publication,Map<String,String> requiredChecks,Instant deadline,io.github.xuxiaotuan.magicflink.protocol.PlatformDefinitions.RetryPolicy retryPolicy,io.github.xuxiaotuan.magicflink.protocol.PlatformDefinitions.TimeLimits timeLimits) {
         public Registration {
-            id(runId);digest(resolvedSpecDigest);Objects.requireNonNull(phase);Objects.requireNonNull(publication);Objects.requireNonNull(deadline);
+            Objects.requireNonNull(timeLimits);Objects.requireNonNull(retryPolicy);id(runId);digest(resolvedSpecDigest);Objects.requireNonNull(phase);Objects.requireNonNull(publication);Objects.requireNonNull(deadline);
             stages=List.copyOf(stages);requiredChecks=Map.copyOf(requiredChecks);requiredChecks.forEach((key,value)->{id(key);digest(value);});
             if(stages.isEmpty()||stages.size()>32||requiredChecks.size()>64||new HashSet<>(stages.stream().map(StageIdentity::stage).toList()).size()!=stages.size())throw new IllegalArgumentException("unique current stages required");
             for(var stage:stages) if(!stage.stage().runId().equals(runId)||!stage.resolvedSpecDigest().equals(resolvedSpecDigest)||phaseFor(stage.stage().type())!=phase)throw new IllegalArgumentException("stage/run/phase mismatch");
             if(phase==Phase.RECONCILING_TARGET&&(stages.size()!=1||publication.isEmpty()||requiredChecks.isEmpty()))throw new IllegalArgumentException("frozen publication basis and mandatory target checks required");
             if(phase!=Phase.RECONCILING_TARGET&&(publication.isPresent()||!requiredChecks.isEmpty()))throw new IllegalArgumentException("publication context only accepted at target reconciliation");
         }
-        public String contentDigest(){return hash("RUN_REGISTRATION",Map.of("runId",runId,"spec",resolvedSpecDigest,"phase",phase.name(),"stages",stages.stream().map(TransactionContracts::identityDigest).sorted().toList(),"publication",publication.map(b->Map.<String,Object>of("key",b.key().canonical(),"load",b.loadId(),"candidate",b.candidateDigest(),"revision",b.expectedRevision())).orElse(Map.of()),"checks",requiredChecks,"deadline",deadline));}
+        public String contentDigest(){return hash("RUN_REGISTRATION_V2",Map.of("runId",runId,"spec",resolvedSpecDigest,"phase",phase.name(),"stages",stages.stream().map(TransactionContracts::identityDigest).sorted().toList(),"publication",publication.map(b->Map.<String,Object>of("key",b.key().canonical(),"load",b.loadId(),"candidate",b.candidateDigest(),"revision",b.expectedRevision())).orElse(Map.of()),"checks",requiredChecks,"deadline",deadline,"retry",Map.of("maxRetries",retryPolicy.maxStageRetries(),"backoff",retryPolicy.backoff().toString()),"time",Map.of("stage",timeLimits.stage().toString(),"run",timeLimits.run().toString(),"wait",timeLimits.evidenceWait().toString(),"poll",timeLimits.poll().toString())));}
     }
     public record RunView(String runId,long revision,Phase phase,boolean cancelRequested) {}
     public record CheckProof(StageIdentity identity,String checkId,String ruleDigest,String candidateDigest,String loadId,CheckStatus status,URI objectKey,String objectDigest) {

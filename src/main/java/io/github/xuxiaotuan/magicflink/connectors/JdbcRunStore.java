@@ -1,6 +1,8 @@
 package io.github.xuxiaotuan.magicflink.connectors;
 
 import io.github.xuxiaotuan.magicflink.control.StageIdentity;
+import io.github.xuxiaotuan.magicflink.control.AttemptContracts;
+import io.github.xuxiaotuan.magicflink.control.AttemptContracts.*;
 import io.github.xuxiaotuan.magicflink.control.TransactionContracts;
 import io.github.xuxiaotuan.magicflink.control.TransactionContracts.*;
 import io.github.xuxiaotuan.magicflink.protocol.DomainSnapshots;
@@ -14,20 +16,20 @@ import java.util.*;
 public final class JdbcRunStore {
     private final JdbcTransactions tx;
     private final Clock clock;
-    public JdbcRunStore(DataSource source,int queryTimeoutSeconds,Clock clock){tx=new JdbcTransactions(source,queryTimeoutSeconds);this.clock=Objects.requireNonNull(clock);}
+    private final JdbcAttempts attempts;
+    public JdbcRunStore(DataSource source,int queryTimeoutSeconds,Clock clock){tx=new JdbcTransactions(source,queryTimeoutSeconds);this.clock=Objects.requireNonNull(clock);attempts=new JdbcAttempts(tx,clock,this);}
     /** Trusted platform registration, not a public API for claiming earlier phases were executed. */
     public void create(Registration registration)throws SQLException{
         Objects.requireNonNull(registration);
         tx.run(c->{
             var b=registration.publication();
-            int inserted=tx.update(c,"INSERT INTO mf_run(run_id,registration_digest,resolved_digest,phase,revision,cancel_requested,deadline,key_payload,load_id,candidate_digest,expected_revision) VALUES (?,?,?,?,0,FALSE,?,?,?,?,?) ON CONFLICT DO NOTHING",
+            int inserted=tx.update(c,"INSERT INTO mf_run(run_id,registration_digest,resolved_digest,phase,revision,cancel_requested,deadline,key_payload,load_id,candidate_digest,expected_revision,max_stage_retries,retry_backoff,stage_timeout,evidence_wait) VALUES (?,?,?,?,0,FALSE,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
                     registration.runId(),registration.contentDigest(),registration.resolvedSpecDigest(),registration.phase().name(),registration.deadline().toString(),
-                    b.map(v->v.key().canonical()).orElse(null),b.map(PublicationBasis::loadId).orElse(null),b.map(PublicationBasis::candidateDigest).orElse(null),b.map(PublicationBasis::expectedRevision).orElse(null));
+                    b.map(v->v.key().canonical()).orElse(null),b.map(PublicationBasis::loadId).orElse(null),b.map(PublicationBasis::candidateDigest).orElse(null),b.map(PublicationBasis::expectedRevision).orElse(null),registration.retryPolicy().maxStageRetries(),registration.retryPolicy().backoff().toString(),registration.timeLimits().stage().toString(),registration.timeLimits().evidenceWait().toString());
             var current=locked(c,registration.runId());
             if(!current.registrationDigest().equals(registration.contentDigest()))throw new SQLException("run registration conflict","MF001");
             if(inserted==1){
-                for(var stage:registration.stages())tx.one(tx.update(c,"INSERT INTO mf_stage(run_id,stage_type,input_alias,identity_digest,identity_body,state) VALUES (?,?,?,?,?,'ACTIVE')",
-                        registration.runId(),stage.stage().type().name(),stage.stage().inputAlias().orElse(""),TransactionContracts.identityDigest(stage),TransactionContracts.identityCanonical(stage)));
+                for(var stage:registration.stages())attempts.register(c,registration,stage);
                 for(var rule:registration.requiredChecks().entrySet())tx.one(tx.update(c,"INSERT INTO mf_required_check(run_id,check_id,rule_digest) VALUES (?,?,?)",registration.runId(),rule.getKey(),rule.getValue()));
             }
             return null;
@@ -36,19 +38,15 @@ public final class JdbcRunStore {
     public RunView read(String runId)throws SQLException{TransactionContracts.id(runId);return tx.run(c->locked(c,runId).view());}
     public Optional<AuthorizedPublication> intent(String runId)throws SQLException{TransactionContracts.id(runId);return tx.run(c->intent(c,runId));}
 
-    public List<StageIdentity> currentStages(String runId)throws SQLException{
-        TransactionContracts.id(runId);return tx.run(c->{
-            var run=locked(c,runId);List<StageIdentity> identities=new ArrayList<>();
-            try(var p=tx.prepare(c,"SELECT * FROM mf_stage WHERE run_id=? ORDER BY stage_type,input_alias",runId);var r=p.executeQuery()){
-                while(r.next()){
-                    var identity=storedIdentity(r);
-                    if(!identity.stage().runId().equals(runId)||!identity.resolvedSpecDigest().equals(run.resolvedDigest()))throw new SQLException("stored run/stage mismatch","MF004");
-                    identities.add(identity);
-                }
-            }
-            return List.copyOf(identities);
-        });
-    }
+    public List<StageIdentity> currentStages(String runId)throws SQLException{TransactionContracts.id(runId);return tx.run(c->{locked(c,runId);return attempts.currentBound(c,runId);});}
+    public List<AttemptView> attemptHistory(StageIdentity.StageKey key)throws SQLException{return attempts.history(key);}
+    public RecoverySnapshot recover(String runId)throws SQLException{return attempts.recover(runId);}
+    public Decision recordStop(long revision,StopEvidence evidence)throws SQLException{return attempts.stop(revision,evidence);}
+    public Decision retryCurrent(long revision,AttemptRef previous,PlannedAttempt replacement)throws SQLException{return attempts.retry(revision,previous,replacement);}
+    public Decision materializeNext(long revision,PlannedAttempt next)throws SQLException{return attempts.materialize(revision,next);}
+    public Decision beginDispatch(long revision,AttemptRef ref,String dispatchId)throws SQLException{return attempts.begin(revision,ref,dispatchId);}
+    public Decision bindExecution(long revision,StageIdentity identity,String dispatchId)throws SQLException{return attempts.bind(revision,identity,dispatchId);}
+    public Decision finishCancellation(String runId,long revision)throws SQLException{return attempts.finishCancellation(runId,revision);}
     public Decision confirmPublication(String runId,long observedRevision,PublicationObservation observation)throws SQLException{
         TransactionContracts.id(runId);Objects.requireNonNull(observation);
         return tx.run(c->{
@@ -93,7 +91,7 @@ public final class JdbcRunStore {
                     try(var q=tx.prepare(c,"SELECT input_alias,manifest_id,content_digest FROM mf_manifest WHERE run_id=? AND stage_type=? ORDER BY input_alias",run.runId(),identity.stage().type().name());var files=q.executeQuery()){
                         while(files.next())manifests.add(Map.of("alias",files.getString(1),"id",files.getString(2),"digest",files.getString(3)));
                     }
-                    tx.one(tx.update(c,"INSERT INTO mf_next_intent(run_id,stage_type,input_alias,consumed_digest) VALUES (?,?,'',?)",run.runId(),nextType.name(),TransactionContracts.hash("SEALED_INPUTS",Map.of("manifests",manifests))));
+                    tx.one(tx.update(c,"INSERT INTO mf_next_intent(run_id,stage_type,input_alias,consumed_digest,consumed_body,cancelled) VALUES (?,?,'',?,?,FALSE)",run.runId(),nextType.name(),TransactionContracts.hash("SEALED_INPUTS",Map.of("manifests",manifests)),AttemptContracts.encode(Map.of("manifests",manifests))));
                 }
             }
             advance(c,run,next,false);event(c,run.runId(),"MANIFEST_SEALED",content);return Decision.APPLIED;
@@ -132,6 +130,7 @@ public final class JdbcRunStore {
             String identity;
             try(var p=tx.prepare(c,"SELECT * FROM mf_stage WHERE run_id=? AND stage_type='TARGET_CHECK' AND input_alias=''",runId);var r=p.executeQuery()){
                 if(!r.next()||!r.getString("state").equals("COMPLETED"))return Decision.NOT_READY;
+                attempts.current(c,new StageIdentity.StageKey(runId,StageIdentity.StageType.TARGET_CHECK,Optional.empty()));
                 var current=storedIdentity(r);if(!current.resolvedSpecDigest().equals(run.resolvedDigest()))throw new SQLException("stored run/stage mismatch","MF004");identity=TransactionContracts.identityDigest(current);
             }
             if(!allPassed(c,run,identity))return Decision.NOT_READY;
@@ -160,12 +159,10 @@ public final class JdbcRunStore {
             r.next();return r.getLong(1)>0&&r.getLong(1)==r.getLong(2);
         }
     }
-    private record StageRow(String identity,boolean completed){}
-    private StageRow stage(Connection c,StageIdentity i)throws SQLException{
-        try(var p=tx.prepare(c,"SELECT * FROM mf_stage WHERE run_id=? AND stage_type=? AND input_alias=?",i.stage().runId(),i.stage().type().name(),i.stage().inputAlias().orElse(""));var r=p.executeQuery()){
-            if(!r.next())return null;var actual=storedIdentity(r);
-            return new StageRow(TransactionContracts.identityDigest(actual),r.getString("state").equals("COMPLETED"));
-        }
+    private record StageRow(String identity,boolean completed,boolean accepting){}
+    private StageRow stage(Connection c,StageIdentity identity)throws SQLException{
+        var row=attempts.current(c,identity.stage());if(row==null)return null;
+        return new StageRow(row.identity().map(TransactionContracts::identityDigest).orElse(null),row.completed(),row.state()==ExecutionState.RUNNING||row.state()==ExecutionState.SUCCEEDED);
     }
     private StageIdentity storedIdentity(ResultSet r)throws SQLException{
         try{
@@ -174,19 +171,19 @@ public final class JdbcRunStore {
             return i;
         }catch(RuntimeException corrupt){throw new SQLException("stored stage identity corrupt","MF004");}
     }
-    private boolean matches(RunRow run,StageRow stage,StageIdentity i){return stage!=null&&run.resolvedDigest().equals(i.resolvedSpecDigest())&&stage.identity().equals(TransactionContracts.identityDigest(i));}
-    private void complete(Connection c,StageIdentity i)throws SQLException{tx.one(tx.update(c,"UPDATE mf_stage SET state='COMPLETED' WHERE run_id=? AND stage_type=? AND input_alias=? AND identity_digest=? AND state='ACTIVE'",i.stage().runId(),i.stage().type().name(),i.stage().inputAlias().orElse(""),TransactionContracts.identityDigest(i)));}
-    private void advance(Connection c,RunRow run,Phase next,boolean cancel)throws SQLException{tx.one(tx.update(c,"UPDATE mf_run SET revision=revision+1,phase=?,cancel_requested=? WHERE run_id=? AND revision=? AND cancel_requested=FALSE",next.name(),cancel,run.runId(),run.revision()));}
-    private void event(Connection c,String run,String kind,String digest)throws SQLException{tx.one(tx.update(c,"INSERT INTO mf_event(event_id,run_id,event_kind,content_digest,recorded_at) VALUES (?,?,?,?,?)",UUID.randomUUID().toString(),run,kind,digest,clock.instant().toString()));}
-    private record RunRow(String runId,String registrationDigest,String resolvedDigest,Phase phase,long revision,boolean cancelRequested,Instant deadline,Optional<PublicationBasis> basis){RunView view(){return new RunView(runId,revision,phase,cancelRequested);}}
-    private RunRow locked(Connection c,String runId)throws SQLException{
+    private boolean matches(RunRow run,StageRow stage,StageIdentity i){return stage!=null&&stage.accepting()&&run.resolvedDigest().equals(i.resolvedSpecDigest())&&Objects.equals(stage.identity(),TransactionContracts.identityDigest(i));}
+    private void complete(Connection c,StageIdentity i)throws SQLException{attempts.complete(c,i);tx.one(tx.update(c,"UPDATE mf_stage SET state='COMPLETED' WHERE run_id=? AND stage_type=? AND input_alias=? AND identity_digest=? AND state='ACTIVE'",i.stage().runId(),i.stage().type().name(),i.stage().inputAlias().orElse(""),TransactionContracts.identityDigest(i)));}
+    void advance(Connection c,RunRow run,Phase next,boolean cancel)throws SQLException{tx.one(tx.update(c,"UPDATE mf_run SET revision=revision+1,phase=?,cancel_requested=? WHERE run_id=? AND revision=? AND cancel_requested=FALSE",next.name(),cancel,run.runId(),run.revision()));}
+    void event(Connection c,String run,String kind,String digest)throws SQLException{tx.one(tx.update(c,"INSERT INTO mf_event(event_id,run_id,event_kind,content_digest,recorded_at) VALUES (?,?,?,?,?)",UUID.randomUUID().toString(),run,kind,digest,clock.instant().toString()));}
+    record RunRow(String runId,String registrationDigest,String resolvedDigest,Phase phase,long revision,boolean cancelRequested,Instant deadline,Optional<PublicationBasis> basis,int maxRetries,Duration backoff,Duration stageTimeout,Duration evidenceWait){RunView view(){return new RunView(runId,revision,phase,cancelRequested);}}
+    RunRow locked(Connection c,String runId)throws SQLException{
         try(var p=tx.prepare(c,"SELECT * FROM mf_run WHERE run_id=? FOR UPDATE",runId);var r=p.executeQuery()){
             if(!r.next())throw new SQLException("unknown run","MF003");String key=r.getString("key_payload");
             var basis=key==null?Optional.<PublicationBasis>empty():Optional.of(new PublicationBasis(BusinessKey.restore(key),r.getString("load_id"),r.getString("candidate_digest"),r.getLong("expected_revision")));
-            return new RunRow(runId,r.getString("registration_digest"),r.getString("resolved_digest"),Phase.valueOf(r.getString("phase")),r.getLong("revision"),r.getBoolean("cancel_requested"),Instant.parse(r.getString("deadline")),basis);
+            return new RunRow(runId,r.getString("registration_digest"),r.getString("resolved_digest"),Phase.valueOf(r.getString("phase")),r.getLong("revision"),r.getBoolean("cancel_requested"),Instant.parse(r.getString("deadline")),basis,r.getInt("max_stage_retries"),Duration.parse(r.getString("retry_backoff")),Duration.parse(r.getString("stage_timeout")),Duration.parse(r.getString("evidence_wait")));
         }
     }
-    private Optional<AuthorizedPublication> intent(Connection c,String run)throws SQLException{
+    Optional<AuthorizedPublication> intent(Connection c,String run)throws SQLException{
         try(var p=tx.prepare(c,"SELECT * FROM mf_publication_intent WHERE run_id=?",run);var r=p.executeQuery()){
             if(!r.next())return Optional.empty();return Optional.of(new AuthorizedPublication(JdbcPublicationStore.request(r),Instant.parse(r.getString("authorized_at"))));
         }
