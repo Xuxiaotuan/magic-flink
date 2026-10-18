@@ -2,7 +2,7 @@
 
 **检查日期：** 2026-10-18。**清单状态：** `NOT_FROZEN / evidence_incomplete`。T02 只读盘点已完成，制品核验、完整依赖解析和准入尚未完成，T02 未验收。
 
-本文保留基于项目提交 `76f7739` 的本地版本、制品摘要与官方元数据检查，并补充基于 `1225e2a` 的 E01 Chart/CRD 静态核对。关联：[环境与固定数据](environment-and-fixtures.md)、[P0 计划](../superpowers/plans/2026-10-18-p0-baseline-and-file-commit-validation.md)。主体章节整理前轮证据；本轮核心构建新增证据见第 6 节；复用建议不是对原计划候选的正式替换，T08 才能形成通过验收的 ReleaseManifest。
+本文保留基于项目提交 `76f7739` 的本地版本、制品摘要与官方元数据检查，并补充基于 `1225e2a` 的 E01 Chart/CRD 静态核对。关联：[环境与固定数据](environment-and-fixtures.md)、[P0 计划](../superpowers/plans/2026-10-18-p0-baseline-and-file-commit-validation.md)。主体章节整理前轮证据；本地核心构建证据见第 6、7 节；复用建议不是对原计划候选的正式替换，T08 才能形成通过验收的 ReleaseManifest。
 
 ## 1. 原候选与本机现状
 
@@ -99,7 +99,7 @@ V01 的本地工具选择可以先于环境部署完成；V03 的共享资源静
 后续可以针对 1.20.5 开展带条件的 T03 静态研究，但应记录其候选制品尚未冻结，正式接口结论须绑定最终采用的准确制品和源码。只有 T01/T02 的缺口补齐并满足原验收标准后，才能把后续运行任务标记为具备执行条件。
 
 
-## 6. 2026-10-18 本地核心构建组合（不冻结运行发行版）
+## 6. 首批本地核心构建组合（历史，不冻结运行发行版）
 
 本次复用已有工具及 `~/.m2` 缓存，不安装 JDK/Maven，不修改默认 PATH、不下载构建依赖、不使用本机 Flink 分发 JAR。`mvn -o package` 成功只证明下列核心代码组合可本地构建，未取代上述 T02 运行制品和扫描关口。
 
@@ -113,4 +113,15 @@ V01 的本地工具选择可以先于环境部署完成；V03 的共享资源静
 
 SnakeYAML JAR SHA-256：`c8f7a98e7394adda02f6317249710e4d1b4c7a25aa8c7eace0c2eea52eb8bf85`；本地与[官方 SHA-1](https://repo.maven.apache.org/maven2/org/yaml/snakeyaml/2.6/snakeyaml-2.6.jar.sha1)均为 `2bc14918a2f8d5414749ab12d0c590cd3198b8c1`。此校验是来源对照，不能代替签名、漏洞扫描和行内准入。JUnit/插件运行成功不代表整个缓存已验签。
 
-T03 固定 Flink 源码 commit 和接口范围见[源码核对](file-commit-protocol.md)。当前 POM 未引入 Flink、JDBC、Parquet、S3 SDK；不代表最终发行依赖闭包已齐。当前 JAR 为开发中的核心库，不能部署或当作已扫描 fat JAR 提交。
+T03 固定 Flink 源码 commit 和接口范围见[源码核对](file-commit-protocol.md)。首批 POM 尚未引入 Flink、JDBC、Parquet、S3 SDK；本轮 Planner 变更见第 7 节；不代表最终发行依赖闭包已齐。当前 JAR 为开发中的核心库，不能部署或当作已扫描 fat JAR 提交。
+
+
+## 7. 本轮本地 SQL Planner 依赖补充
+
+新增 `org.apache.flink:flink-table-planner_2.12:1.20.5`，scope=`provided`，通过正常 Maven 项目依赖解析取得普通 Planner 及必要闭包；不使用隔离的 loader，也不修改共享 Flink 安装或其他项目 POM。未安装系统工具、未执行 Maven install、未部署。本轮后续测试和 package 使用 offline 模式，测试 JVM 从 192 MiB 增至 384 MiB 以容纳本地 Planner。
+
+普通 Planner JAR 大小 21,621,003 字节；SHA-256 为 `8b67c727098bdd44e2c4c64cfe5f10eba35f1bc36c29016dfacf732a4b6f3850`；本地与[官方 SHA-1](https://repo.maven.apache.org/maven2/org/apache/flink/flink-table-planner_2.12/1.20.5/flink-table-planner_2.12-1.20.5.jar.sha1)均为 `51038d1ec2b74ce01577bccf0ac645b3670bffe4`。来源对照不等于扫描或发行准入。
+
+实际 Surefire classpath 共 63 个 JAR，21 个非 shaded Flink JAR 全部为 1.20.5，未混入 planner-loader；文件名与 SHA-256 清单存于忽略目录 `target/local-planner-classpath.tsv`。本轮 offline dependency:tree 因插件自己的 plexus-io/maven-dependency-analyzer 闭包不全而失败；未补装插件，转而检查实际测试 classpath，不能据此宣称最终发行依赖树/SBOM 已完成。
+
+普通 Planner 方案要求最终固定镜像向 Service/Runner 都提供相同的 Planner/API/runtime 组合，尚未验证镜像 SPI/类加载。当前普通应用 JAR 不包含 Flink/Calcite 类；T05 单 fat JAR 双入口和 T08 扫描/ReleaseManifest 仍未完成。实现使用 Internal API，改版必须重跑 [SQL 与摘要合同](sql-and-digest-contracts.md)中的能力负例。

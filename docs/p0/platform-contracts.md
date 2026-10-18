@@ -1,6 +1,6 @@
 # 本地核心合同与验证记录
 
-2026-10-18，依据设计 v0.2 和 P0 T03/T04。本轮已完成 T03 静态源码核对，提前实现不依赖集群的 YAML 与恢复判定。**这是 T04 的部分实现及 P1 的部分前置逻辑，不是完整 P0 或完整服务。**
+2026-10-18，依据设计 v0.2 和 P0 T03/T04。已完成 T03 静态核对、YAML 与恢复判定；本轮新增本地 SQL Planner 和对象摘要。**这是 T04 的部分实现及 P1 的部分前置逻辑，不是完整 P0 或完整服务。**
 
 ## 1. 已实现的代码
 
@@ -8,11 +8,13 @@
 |---|---|---|
 | [JobSpec](../../src/main/java/io/github/xuxiaotuan/magicflink/spec/JobSpec.java) | 不可变定义、参数、输入、固定检查类型、输出及类型化绑定结果 | 不是已授权的 ResolvedRunSpec |
 | [JobSpecParser](../../src/main/java/io/github/xuxiaotuan/magicflink/spec/JobSpecParser.java) | UTF-8/YAML 严格解析、字段/类型约束、默认值合并、批次参数绑定 | 不解析/执行 SQL，不解析数据集版本或连接配置 |
-| [StageIdentity](../../src/main/java/io/github/xuxiaotuan/magicflink/control/StageIdentity.java) | 逻辑阶段键、当前 attempt、执行器、CR UID/JobID、计划/配置/消费数据摘要 | 摘要是上层已冻结事实，本轮未实现规范化摘要算法 |
+| [StageIdentity](../../src/main/java/io/github/xuxiaotuan/magicflink/control/StageIdentity.java) | 逻辑阶段键、当前 attempt、执行器、CR UID/JobID、计划/配置/消费数据摘要 | 摘要仍需上层冻结事实；规范化算法见 protocol，不能拿摘要代替来源核验 |
 | [ReceiptGate](../../src/main/java/io/github/xuxiaotuan/magicflink/control/ReceiptGate.java) | 当前资格、取消、revision、证据完整性、幂等重复/冲突的纯判定 | 没有数据库事务或实际状态推进 |
+| [SqlPlannerValidator](../../src/main/java/io/github/xuxiaotuan/magicflink/spec/SqlPlannerValidator.java) | 同版 Flink 语法/名称/类型、AST 和关系计划能力、输出 Schema、运行 integer 范围 | 本地规划，不执行查询；表/参数 Schema 由平台提供 |
+| [ObjectDigests](../../src/main/java/io/github/xuxiaotuan/magicflink/protocol/ObjectDigests.java) | Schema/定义/绑定/阶段计划/提交证据/清单/回执的规范化身份 | 最小共同摘要合同，不授予封存或发布资格 |
 | [SealRecovery](../../src/main/java/io/github/xuxiaotuan/magicflink/control/SealRecovery.java) | 从持久终态、证据、文件核验和封存观察选择下一步 | 不生成真实 CommitEvidence，不读写文件或数据库 |
 
-采用单 Maven 工程，未引入 Web 框架、调度器、仓储抽象、内存数据库、插件体系或新进程。未来 Service/Runner 仍进入同一工程与统一测试扫描的 fat JAR，不接受用户 JAR。
+采用单 Maven 工程，同版普通 Flink Planner 为 provided 依赖；未引入 Web 框架、调度器、仓储抽象、内存数据库、插件体系或新进程。未来 Service/Runner 仍进入同一工程与统一测试扫描的 fat JAR，不接受用户 JAR。
 
 ## 2. YAML 与参数合同
 
@@ -24,7 +26,7 @@
 
 `bind(spec, suppliedParameters)` 拒绝未声明参数、null、集合和错误类型。必需参数必须传值，可选参数必须在定义中有合法默认值。结果类型为 String、Boolean、BigInteger、BigDecimal、LocalDate；不把金额转换成 double。decimal 仅接受普通十进制字符串，无科学计数法，不截断、不舍入。日期严格校验日历。每个输入/输出 batch 为字面量或完整 `${name}`，不存在任意表达式求值。
 
-SQL 保留原文，拒绝 `${...}` 插值，后续参数通过只读 `job_params` 表注入。**当前解析成功不代表 SQL 合法或可以执行**：单条 SELECT/WITH、禁止 DDL/DML、多语句和外部 Catalog、输出 Schema/DECIMAL/时间精度等仍须真实 Planner 和注册表验证。没有用正则假装完成 SQL 语义检查，也没有提供执行入口。
+YAML 解析成功仍不代表 SQL 已验证；随后调用同版 Flink 的本地 Planner，执行 AST、关系计划与输出 Schema 的能力检查。当前已实现单条 SELECT/CTE、表引用隔离、Join 等值键、函数/类型和无损转换判定；LIMIT/OFFSET 因缺少稳定全序证明一律拒绝。详细范围、运行参数映射和错误合同见 [SQL 与摘要合同](sql-and-digest-contracts.md)。SQL 原文保留，不做插值，也不执行查询；注册表权限和真实运行仍未完成。
 
 `preChecks`/`postChecks` 缺省才使用空列表。用户不能配置 row-compare；系统强制就绪规则、输出业务规则、目标完整比较仍需后续服务合并。本轮只验证检查定义，不执行检查查询或声称数据一致。
 
@@ -77,7 +79,7 @@ Observation 必须绑定同一 StageIdentity 和对应证据内容。COMPLETE �
 - UNKNOWN 等待需要后续控制器有界重查并在超期时报告 NEEDS_ATTENTION；不能无限热循环，也不能因超时而覆盖对象。GET 错误不自动降级为 ABSENT。
 - 本类只用于 COLLECT/COMPUTE 文件阶段；检查报告、目标写入、首次发布的恢复合同需要各自实现，不复用文件状态冒充发布事务。
 
-## 5. 本轮验证证据
+## 5. 首批核心验证证据（历史，64 项）
 
 复用本机 Microsoft Java 17.0.14 与 Maven 3.9.16，实际命令：
 
@@ -87,7 +89,7 @@ MAVEN_OPTS='-Xmx256m -XX:ActiveProcessorCount=2' \
 /opt/homebrew/bin/mvn -o package
 ```
 
-Surefire 固定一个测试进程，`-Xmx192m -XX:ActiveProcessorCount=2`。不启动 Flink MiniCluster、容器、Kubernetes 作业或 PostgreSQL。所有构建依赖使用既有本地缓存；本轮没有安装或部署。
+首批 Surefire 固定一个测试进程，`-Xmx192m -XX:ActiveProcessorCount=2`。不启动 Flink MiniCluster、容器、Kubernetes 作业或 PostgreSQL。所有构建依赖使用既有本地缓存；该批没有安装或部署；后续 Planner 构建变更见第 7 节。
 
 2026-10-18 15:45:35（Asia/Shanghai）最终构建退出码 0：**64 tests，0 failures，0 errors，0 skipped，BUILD SUCCESS**。
 
@@ -102,9 +104,18 @@ Surefire 固定一个测试进程，`-Xmx192m -XX:ActiveProcessorCount=2`。不�
 
 ## 6. 尚未完成的验收
 
-- T04 的 ConnectionProfile/DatasetDefinition/RuntimeProfile 完整合同、规范化摘要、原子对象写入、事务 CAS、首次发布唯一键初始化/历史去重及并发验证。
+- T04 的 ConnectionProfile/DatasetDefinition/RuntimeProfile 完整合同、摘要载荷的完整领域核验、原子对象写入、事务 CAS、首次发布唯一键初始化/历史去重及并发验证。
 - T05 的双入口、真实 Flink/Planner/JDBC/Parquet/S3 依赖闭包、fat JAR、SBOM/扫描及固定镜像。
 - T06/T07 的合法文件集合、失败 task 排除、零行、多文件、内容核验、真实存储故障和 F01–F13。
-- P1 的服务受理、权限、规划、协调器及持久化；四源采集和业务 Join 仍按原阶段推进。
+- P1 的服务受理、权限、完整检查 Schema/运行能力受理、协调器及持久化；四源采集和业务 Join 仍按原阶段推进。
 
 因此当前状态为“本地核心测试通过，运行/事务证据 evidence_incomplete”。T03 为 GO_TO_SPIKE，环境准入仍 NO_GO。后续可继续本地开发，不重复把环境检查当作所有代码工作的前置条件。
+
+
+## 7. 第二批：本地 Planner 与摘要（当前，126 项）
+
+新增实现和严格能力范围见 [SQL Planner 与对象摘要合同](sql-and-digest-contracts.md)。本轮补足真实 Flink 本地规划及 canonical-v1，共 126 个测试（YAML 46、SQL 37、摘要 25、恢复 18）；2026-10-18 16:14:21 最终 `mvn -o package` 退出码 0，126 tests / 0 failures / 0 errors / 0 skipped；普通应用 JAR 含 47 个应用 class，不含 Flink/Calcite 和测试类。
+
+七类摘要覆盖 Schema、JobDefinition、ResolvedRunSpec、StagePlan、CommitEvidence、Manifest、StageReceipt。输入/输出配置版本、参数类型、逻辑阶段和外部身份被纳入身份；文件列表排序、重复身份拒绝、UTC 时间和恢复稳定性已测试。数据库 SEALED 状态与恢复进程当前时间不进入不可变内容。摘要不证明文件内容实际正确，也不代替事务 CAS。
+
+测试复用现有工具；普通 Planner 依赖经 Maven 正常解析，后续支持离线构建。测试堆上限调整为 384 MiB、单 fork、2 个处理器，Maven 上限仍为 256 MiB；未启动集群/数据库、未安装/部署，未提交或推送。
