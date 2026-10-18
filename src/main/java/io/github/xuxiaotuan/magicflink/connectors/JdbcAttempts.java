@@ -64,7 +64,10 @@ final class JdbcAttempts {
             List<AttemptView> result=new ArrayList<>();for(var id:ids)result.add(read(c,new AttemptRef(key,id)).view());return List.copyOf(result);});
     }
     RecoverySnapshot recover(String runId)throws SQLException{
-        TransactionContracts.id(runId);return tx.run(c->{var run=runs.locked(c,runId);List<NextIntent> intents=new ArrayList<>();
+        TransactionContracts.id(runId);return tx.run(c->recover(c,runId));
+    }
+    RecoverySnapshot recover(Connection c,String runId)throws SQLException{
+        var run=runs.locked(c,runId);List<NextIntent> intents=new ArrayList<>();
             try(var p=tx.prepare(c,"SELECT * FROM mf_next_intent WHERE run_id=? ORDER BY stage_type,input_alias",runId);var r=p.executeQuery()){
                 while(r.next()){var key=key(runId,r.getString("stage_type"),r.getString("input_alias"));validateIntent(c,key,r.getString("consumed_body"),r.getString("consumed_digest"));
                     var first=opt(r.getString("first_attempt_id"));if(first.isPresent()&&read(c,new AttemptRef(key,first.get()))==null)throw corrupt();
@@ -74,7 +77,6 @@ final class JdbcAttempts {
             if((run.phase()==Phase.PRECHECKING||run.phase()==Phase.VALIDATING_RESULT)&&intents.isEmpty()&&current.stream().anyMatch(Row::completed))throw corrupt();
             for(var row:current)if(!row.spec().equals(run.resolvedDigest()))throw corrupt();
             return new RecoverySnapshot(run.view(),current.stream().map(Row::view).toList(),intents);
-        });
     }
     Decision materialize(long revision,PlannedAttempt plan)throws SQLException{
         return tx.run(c->{var run=runs.locked(c,plan.ref().key().runId());if(run.revision()!=revision)return Decision.REREAD;if(run.cancelRequested())return Decision.ARCHIVE_ONLY;
@@ -93,14 +95,20 @@ final class JdbcAttempts {
         });
     }
     Decision begin(long revision,AttemptRef ref,String dispatchId)throws SQLException{
-        TransactionContracts.id(dispatchId);return tx.run(c->{var run=runs.locked(c,ref.key().runId());if(run.revision()!=revision)return Decision.REREAD;var row=current(c,ref.key());
+        TransactionContracts.id(dispatchId);return tx.run(c->{
+            var run=runs.locked(c,ref.key().runId());
+            try(var p=tx.prepare(c,"SELECT run_id FROM mf_admission WHERE run_id=?",run.runId());var r=p.executeQuery()){if(r.next())return Decision.NOT_READY;}
+            return begin(c,revision,ref,dispatchId);
+        });
+    }
+    Decision begin(Connection c,long revision,AttemptRef ref,String dispatchId)throws SQLException{
+        var run=runs.locked(c,ref.key().runId());if(run.revision()!=revision)return Decision.REREAD;var row=current(c,ref.key());
             if(run.cancelRequested()||row==null||!row.ref().equals(ref)||run.phase()!=TransactionContracts.phaseFor(ref.key().type()))return Decision.ARCHIVE_ONLY;
             if(row.stopDigest().isPresent()||row.completed())return Decision.ARCHIVE_ONLY;
             if(row.dispatchId().isPresent())return row.dispatchId().get().equals(dispatchId)?Decision.ALREADY_APPLIED:Decision.CONFLICT;
             if(row.state()!=ExecutionState.PLANNED||row.stopDigest().isPresent()||!clock.instant().isBefore(row.deadline())||!clock.instant().isBefore(run.deadline()))return Decision.NOT_READY;
             tx.one(tx.update(c,"UPDATE mf_attempt SET dispatch_id=?,dispatch_started_at=?,execution_state=? WHERE run_id=? AND stage_type=? AND input_alias=? AND attempt_id=?",dispatchId,clock.instant().toString(),row.executor()==StageIdentity.Executor.FLINK?"SUBMITTING":"RUNNING",run.runId(),ref.key().type().name(),alias(ref),ref.attemptId()));
             runs.advance(c,run,run.phase(),false);runs.event(c,run.runId(),"DISPATCH_STARTED",row.planDigest());return Decision.APPLIED;
-        });
     }
     Decision bind(long revision,StageIdentity identity,String dispatchId)throws SQLException{
         return tx.run(c->{var run=runs.locked(c,identity.stage().runId());if(run.revision()!=revision)return Decision.REREAD;var row=current(c,identity.stage());var ref=new AttemptRef(identity.stage(),identity.attemptId());
@@ -161,13 +169,15 @@ final class JdbcAttempts {
         });
     }
     Decision finishCancellation(String runId,long revision)throws SQLException{
-        return tx.run(c->{var run=runs.locked(c,runId);if(run.revision()!=revision)return Decision.REREAD;if(runs.intent(c,runId).isPresent())return Decision.CANCEL_TOO_LATE;
+        return tx.run(c->finishCancellation(c,runId,revision));
+    }
+    Decision finishCancellation(Connection c,String runId,long revision)throws SQLException{
+        var run=runs.locked(c,runId);if(run.revision()!=revision)return Decision.REREAD;if(runs.intent(c,runId).isPresent())return Decision.CANCEL_TOO_LATE;
             if(run.phase()==Phase.CANCELLED)return Decision.ALREADY_APPLIED;if(!run.cancelRequested()||run.phase()!=Phase.CANCEL_REQUESTED)return Decision.NOT_READY;
             List<AttemptRef> refs=new ArrayList<>();try(var p=tx.prepare(c,"SELECT stage_type,input_alias,attempt_id FROM mf_attempt WHERE run_id=?",runId);var r=p.executeQuery()){while(r.next())refs.add(new AttemptRef(key(runId,r.getString(1),r.getString(2)),r.getString(3)));}
             for(var ref:refs){var row=read(c,ref);if(row.stopDigest().isEmpty())return Decision.WAIT_STOP;stopProof(c,row);}
             tx.update(c,"UPDATE mf_next_intent SET cancelled=TRUE WHERE run_id=?",runId);
             tx.one(tx.update(c,"UPDATE mf_run SET phase='CANCELLED',revision=revision+1 WHERE run_id=? AND revision=? AND cancel_requested=TRUE",runId,run.revision()));runs.event(c,runId,"CANCELLATION_CONFIRMED",run.registrationDigest());return Decision.APPLIED;
-        });
     }
     private StopEvidence stopProof(Connection c,Row row)throws SQLException{
         try(var p=tx.prepare(c,"SELECT content_body FROM mf_stop_evidence WHERE content_digest=?",row.stopDigest().orElseThrow());var r=p.executeQuery()){
@@ -178,6 +188,10 @@ final class JdbcAttempts {
         tx.one(tx.update(c,"UPDATE mf_attempt SET completion_state='COMPLETED',execution_state='SUCCEEDED' WHERE run_id=? AND stage_type=? AND input_alias=? AND attempt_id=? AND identity_digest=? AND completion_state='ACTIVE'",identity.stage().runId(),identity.stage().type().name(),identity.stage().inputAlias().orElse(""),identity.attemptId(),TransactionContracts.identityDigest(identity)));
     }
     private void insertPlan(Connection c,PlannedAttempt p,int ordinal,Optional<String> parent)throws SQLException{insert(c,p.ref(),ordinal,p.executor(),p.planDigest(),p.resolvedSpecDigest(),p.consumedDigest(),p.deadline(),Optional.of(p),p.inlineIdentity(),parent,ExecutionState.PLANNED);}
+    void initialPlan(Connection c,PlannedAttempt plan)throws SQLException{
+        insertPlan(c,plan,0,Optional.empty());
+        tx.one(tx.update(c,"INSERT INTO mf_stage(run_id,stage_type,input_alias,current_attempt_id,identity_digest,identity_body,state) VALUES (?,?,?,?,?,?,'ACTIVE')",plan.ref().key().runId(),plan.ref().key().type().name(),alias(plan.ref()),plan.ref().attemptId(),plan.inlineIdentity().map(TransactionContracts::identityDigest).orElse(null),plan.inlineIdentity().map(TransactionContracts::identityCanonical).orElse(null)));
+    }
     private boolean validDeadline(JdbcRunStore.RunRow run,PlannedAttempt plan){Instant now=clock.instant();return !plan.deadline().isAfter(run.deadline())&&!plan.deadline().isAfter(now.plus(run.stageTimeout()))&&now.isBefore(plan.deadline())&&now.isBefore(run.deadline());}
     private void bump(Connection c,JdbcRunStore.RunRow run)throws SQLException{tx.one(tx.update(c,"UPDATE mf_run SET revision=revision+1 WHERE run_id=? AND revision=? AND cancel_requested=?",run.runId(),run.revision(),run.cancelRequested()));}
     private void validateIntent(Connection c,StageIdentity.StageKey key,String body,String digest)throws SQLException{

@@ -142,3 +142,8 @@ H2 无新增传递依赖，不进入普通应用 JAR。使用 PostgreSQL compati
 ## 10. 尝试历史与恢复构建补充
 
 本批没有增加依赖或修改 POM，继续使用现有 Java 17.0.14、Maven 3.9.16、provided Flink 1.20.5、SnakeYAML 2.6 和仅 test scope 的 H2 2.4.240；构建/测试/package 全部 offline。表结构只在 JUnit 专属临时数据库装载，未连接、安装或部署既有数据库。恢复测试复用不可变域 fixture，避免重复运行无关 Planner；没有以缓存结果替代 JDBC 事务。具体证据见 [尝试历史与恢复合同](attempt-history-and-recovery-contracts.md)，不变更 T02/T05/T08 的版本准入/扫描要求。
+
+
+## 11. 首批受理、协调器和配额构建补充
+
+本批继续使用既有 Java 17.0.14/Maven 3.9.16 和缓存，POM、依赖版本与 scope 不变。新增表和配额策略只在 JUnit 的专属 H2 临时文件数据库中加载/写入；未修改既有 PostgreSQL，未安装或部署。完整作业定义/运行/Catalog/计划只写测试私有 POSIX 目录，不接入真实 S3。构建和边界见[首批受理与协调合同](admission-coordinator-and-reservations.md)；不替代 T02/T05 的单 fat JAR、双入口、扫描和依赖闭包验收。

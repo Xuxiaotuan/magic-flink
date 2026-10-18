@@ -42,11 +42,17 @@ final class JdbcTransactionTestSupport {
     }
     /** Runs all real SQL; only commit acknowledgement is lost, or commit is rejected before sending. */
     static DataSource failCommit(DataSource delegate, boolean afterCommit) {
+        return failCommitOnSql(delegate, afterCommit, null);
+    }
+    /** Injects only at the transaction containing a particular write; read-only recovery commits still work. */
+    static DataSource failCommitOnSql(DataSource delegate, boolean afterCommit, String sqlFragment) {
         return new DataSource() {
             public Connection getConnection() throws SQLException {
                 var real = delegate.getConnection();
+                var selected = new java.util.concurrent.atomic.AtomicBoolean(sqlFragment == null);
                 return (Connection)Proxy.newProxyInstance(Connection.class.getClassLoader(), new Class[]{Connection.class}, (proxy, method, args) -> {
-                    if (method.getName().equals("commit")) {
+                    if (method.getName().equals("prepareStatement") && args[0] instanceof String sql && sqlFragment != null && sql.contains(sqlFragment)) selected.set(true);
+                    if (method.getName().equals("commit") && selected.get()) {
                         if (afterCommit) real.commit();
                         throw new SQLException("injected commit connection failure", "08006");
                     }

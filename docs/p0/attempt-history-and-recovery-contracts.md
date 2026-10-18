@@ -92,3 +92,6 @@ cancel 仍是请求；finishCancellation 在同一 run 锁中再次确认没有 
 初始缺 API 的编译失败不作为行为证明。七项追加反例取得真实断言失败后修正：已停止派发被同 ID 再接管、旧 CR UID 绑定到新尝试、恢复忽略缺失停止证据、确定未创建的瞬时失败无法安全重试、提交证据等待窗口未到仍切换、新尝试超阶段预算、旧当前身份读取接口遗漏运行 spec 核对。另修正多输入历史表上多余的 run+attemptId 唯一约束，保留正确的复合阶段键。
 
 Markdown 本地链接、所有修改/新增文件空白检查及 `git diff --check` 通过；设计 v0.2 SHA-256 仍为 `fff41e1fbe958dbec7c1490c2a76633dc72d60ea9077957771c4c042f8818291`。既有 Calcite 可选注解和 SLF4J NOP 警告仍在，发行版依赖/日志装配留给 T05。本批未安装、部署、暂存、提交或推送。
+
+
+后续实现：首个 COLLECT 的完整计划受理、实际不可变对象回读、协调器单步接管与本地资源预留/归还已进入[第六批合同](admission-coordinator-and-reservations.md)。本页保留第五批历史边界；完整后续阶段、真实派发者 fencing、停止来源及 PostgreSQL 仍独立验收。

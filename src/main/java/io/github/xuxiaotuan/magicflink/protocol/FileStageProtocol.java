@@ -142,23 +142,8 @@ public final class FileStageProtocol {
                 || !plan.resolvedSpecDigest().equals(expectedIdentity.resolvedSpecDigest()) || !plan.consumedDataDigest().equals(expectedIdentity.consumedDataDigest())
                 || !expectedIdentity.equals(evidence.identity()) || !expectedIdentity.equals(accepted.identity())) throw new IllegalArgumentException("plan/configuration/external identity mismatch");
         if (evidence.completedAt().isBefore(plan.plannedAt()) || evidence.completedAt().isAfter(plan.deadline())) throw new IllegalArgumentException("commit outside fixed execution window");
+        validatePlan(run, plan);
         Map<String, InputSnapshot> inputs = new HashMap<>(); plan.inputs().forEach(input -> inputs.put(input.alias(), input));
-        if (plan.key().type() == StageIdentity.StageType.COMPUTE && !inputs.keySet().equals(run.inputVersions().keySet())) throw new IllegalArgumentException("COMPUTE omitted or substituted a resolved input");
-        for (var input : plan.inputs()) {
-            if (!input.dataset().equals(run.inputVersions().get(input.alias())) || !Objects.equals(input.batch(), run.job().inputBatches().get(input.alias()))) throw new IllegalArgumentException("input differs from resolved run");
-            var definition = catalog.inputs().stream().filter(d -> d.ref().equals(input.dataset())).findFirst().orElseThrow(() -> new IllegalArgumentException("fixed dataset version absent"));
-            var projected = new SqlSchema(definition.read().projection().stream().map(name -> column(definition.schema(), name)).toList());
-            var expectedSchema = plan.key().type() == StageIdentity.StageType.COLLECT ? definition.schema() : projected;
-            if (!expectedSchema.equals(input.schema()) || definition.batchType() != input.batchType() || !definition.timezone().equals(input.timezone())
-                    || !definition.read().projection().equals(input.projection()) || !DomainSnapshots.filter(definition, input.batch()).sha256().equals(input.filterDigest())
-                    || input.nullPartitionRequired() != (plan.key().type() == StageIdentity.StageType.COLLECT && column(definition.schema(), definition.read().splitColumn()).type().getLogicalType().isNullable()))
-                throw new IllegalArgumentException("input snapshot differs from fixed dataset/read policy");
-            if (input.expectedRows() == 0 && !definition.allowEmpty()) throw new IllegalArgumentException("empty batch forbidden by dataset");
-            if (plan.key().type() == StageIdentity.StageType.COLLECT) {
-                if (!projected.equals(plan.outputSchema())) throw new IllegalArgumentException("COLLECT output projection/schema mismatch");
-            }
-        }
-        if (plan.key().type() == StageIdentity.StageType.COMPUTE && !plan.outputSchema().equals(catalog.output().schema())) throw new IllegalArgumentException("candidate output schema mismatch");
         Set<WriterSlot> expected = Set.copyOf(plan.expectedWriters());
         if (!expected.equals(accepted.attempts().keySet()) || !expected.equals(evidence.writers().stream().map(w -> w.writer().slot()).collect(java.util.stream.Collectors.toSet())))
             throw new IllegalArgumentException("final writer set differs from plan");
@@ -183,6 +168,32 @@ public final class FileStageProtocol {
         }
         inputs.forEach((alias, input) -> { if (rows.getOrDefault(alias, 0L) != input.expectedRows()) throw new IllegalArgumentException("independent input control total mismatch"); });
         return new VerifiedCommit(catalog, plan, evidence, accepted);
+    }
+    /** Admission checks the complete plan without inventing a native execution identity or commit. */
+    public static void validatePlan(ResolvedRun run, Plan plan) {
+        Objects.requireNonNull(run); Objects.requireNonNull(plan);
+        Catalog catalog = run.catalog();
+        if (!plan.resolvedSpecDigest().equals(DomainSnapshots.run(run).sha256()) || !plan.key().runId().equals(run.runId())
+                || !plan.runDeadline().equals(run.runDeadline()) || plan.plannedAt().isBefore(run.acceptedAt())
+                || !plan.catalogDigest().equals(DomainSnapshots.catalog(catalog).sha256()) || !plan.runtime().equals(catalog.runtime()))
+            throw new IllegalArgumentException("plan differs from frozen admission");
+        Map<String, InputSnapshot> inputs = new HashMap<>(); plan.inputs().forEach(input -> inputs.put(input.alias(), input));
+        if (plan.key().type() == StageIdentity.StageType.COMPUTE && !inputs.keySet().equals(run.inputVersions().keySet())) throw new IllegalArgumentException("COMPUTE omitted or substituted a resolved input");
+        for (var input : plan.inputs()) {
+            if (!input.dataset().equals(run.inputVersions().get(input.alias())) || !Objects.equals(input.batch(), run.job().inputBatches().get(input.alias()))) throw new IllegalArgumentException("input differs from resolved run");
+            var definition = catalog.inputs().stream().filter(d -> d.ref().equals(input.dataset())).findFirst().orElseThrow(() -> new IllegalArgumentException("fixed dataset version absent"));
+            var projected = new SqlSchema(definition.read().projection().stream().map(name -> column(definition.schema(), name)).toList());
+            var expectedSchema = plan.key().type() == StageIdentity.StageType.COLLECT ? definition.schema() : projected;
+            if (!expectedSchema.equals(input.schema()) || definition.batchType() != input.batchType() || !definition.timezone().equals(input.timezone())
+                    || !definition.read().projection().equals(input.projection()) || !DomainSnapshots.filter(definition, input.batch()).sha256().equals(input.filterDigest())
+                    || input.nullPartitionRequired() != (plan.key().type() == StageIdentity.StageType.COLLECT && column(definition.schema(), definition.read().splitColumn()).type().getLogicalType().isNullable()))
+                throw new IllegalArgumentException("input snapshot differs from fixed dataset/read policy");
+            if (input.expectedRows() == 0 && !definition.allowEmpty()) throw new IllegalArgumentException("empty batch forbidden by dataset");
+            if (plan.key().type() == StageIdentity.StageType.COLLECT) {
+                if (!projected.equals(plan.outputSchema())) throw new IllegalArgumentException("COLLECT output projection/schema mismatch");
+            }
+        }
+        if (plan.key().type() == StageIdentity.StageType.COMPUTE && !plan.outputSchema().equals(catalog.output().schema())) throw new IllegalArgumentException("candidate output schema mismatch");
     }
     public record VerifiedFile(CommittedFile file, long rows, String sha256, String schemaDigest) {
         public VerifiedFile { Objects.requireNonNull(file); nonnegative(rows); digest(sha256); digest(schemaDigest); }

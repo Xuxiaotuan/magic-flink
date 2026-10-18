@@ -73,3 +73,23 @@ CREATE TABLE mf_publication_result (
  request_digest VARCHAR(64) NOT NULL, receipt_digest VARCHAR(64) NOT NULL, previous_load_id VARCHAR(128),
  revision BIGINT NOT NULL CHECK (revision>0), recorded_at VARCHAR(40) NOT NULL
 );
+-- One lock order for admission and quota changes: guard, then run. No lease expiry releases resources.
+CREATE TABLE mf_control_guard (guard_id INTEGER PRIMARY KEY CHECK(guard_id=1),policy_body VARCHAR(32768),policy_digest VARCHAR(64),CHECK ((policy_body IS NULL AND policy_digest IS NULL) OR (policy_body IS NOT NULL AND policy_digest IS NOT NULL)));
+INSERT INTO mf_control_guard(guard_id) VALUES (1);
+CREATE TABLE mf_admission (
+ run_id VARCHAR(128) PRIMARY KEY REFERENCES mf_run(run_id),accepted_at VARCHAR(40) NOT NULL,
+ content_body VARCHAR(65536) NOT NULL,content_digest VARCHAR(64) NOT NULL
+);
+CREATE TABLE mf_coordinator_lease (
+ run_id VARCHAR(128) PRIMARY KEY REFERENCES mf_run(run_id),owner_id VARCHAR(128),epoch BIGINT NOT NULL CHECK(epoch>=0),expires_at VARCHAR(40),
+ CHECK ((epoch=0 AND owner_id IS NULL AND expires_at IS NULL) OR (epoch>0 AND owner_id IS NOT NULL AND expires_at IS NOT NULL))
+);
+CREATE TABLE mf_run_slot (run_id VARCHAR(128) PRIMARY KEY REFERENCES mf_run(run_id),released BOOLEAN NOT NULL);
+CREATE TABLE mf_reservation (
+ run_id VARCHAR(128) NOT NULL,stage_type VARCHAR(32) NOT NULL,input_alias VARCHAR(128) NOT NULL,attempt_id VARCHAR(128) NOT NULL,
+ demand_body VARCHAR(8192) NOT NULL,demand_digest VARCHAR(64) NOT NULL,released BOOLEAN NOT NULL,release_digest VARCHAR(64),
+ PRIMARY KEY(run_id,stage_type,input_alias,attempt_id),
+ FOREIGN KEY(run_id,stage_type,input_alias,attempt_id) REFERENCES mf_attempt(run_id,stage_type,input_alias,attempt_id),
+ CHECK ((released=FALSE AND release_digest IS NULL) OR (released=TRUE AND release_digest IS NOT NULL))
+);
+CREATE TABLE mf_physical_connection (physical_id VARCHAR(128) PRIMARY KEY,endpoint VARCHAR(2048) NOT NULL UNIQUE);
