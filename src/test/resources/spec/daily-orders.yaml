@@ -1,0 +1,74 @@
+version: v1
+name: daily_orders
+
+parameters:
+  businessDate:
+    type: date
+    required: true
+
+inputs:
+  orders:
+    dataset: orders_jdbc
+    batch: "${businessDate}"
+  customers:
+    dataset: customers_bq
+    batch: "${businessDate}"
+  branches:
+    dataset: branches_http
+    batch: "${businessDate}"
+  risk:
+    dataset: customer_risk_clickhouse
+    batch: "${businessDate}"
+
+preChecks:
+  - id: all_inputs_ready
+    type: batch-ready
+    inputs: [orders, customers, branches, risk]
+    timeout: 30m
+  - id: customer_key_unique
+    type: unique-key
+    input: customers
+    columns: [customer_id]
+  - id: branch_key_unique
+    type: unique-key
+    input: branches
+    columns: [branch_id]
+  - id: risk_key_unique
+    type: unique-key
+    input: risk
+    columns: [customer_id]
+
+sql: |
+  SELECT
+    o.order_id,
+    o.customer_id,
+    o.amount,
+    c.customer_name,
+    b.branch_name,
+    r.risk_level
+  FROM orders o
+  LEFT JOIN customers c
+    ON o.customer_id = c.customer_id
+  LEFT JOIN branches b
+    ON o.branch_id = b.branch_id
+  LEFT JOIN risk r
+    ON o.customer_id = r.customer_id
+
+postChecks:
+  - id: result_order_key_unique
+    type: unique-key
+    columns: [order_id]
+  - id: complete_order_keys
+    type: key-set-equal
+    expectedInput: orders
+    columns: [order_id]
+  - id: total_amount_equal
+    type: sum-equal
+    expectedInput: orders
+    column: amount
+    tolerance: "0.00"
+
+output:
+  dataset: enriched_orders
+  batch: "${businessDate}"
+  mode: replace-batch

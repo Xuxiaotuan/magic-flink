@@ -1,6 +1,6 @@
 # P0 运行基线与文件提交协议验证实施计划
 
-> 执行说明：目前完成计划、T01/T02 只读盘点、E01 范围核对、15 分钟联合观测和资源预算重算，未安装、部署或编写实现。后续获得相应实施授权后，使用 `superpowers:executing-plans` 逐任务执行；是否委派子代理由用户另行决定。未勾选任务不代表已经实现或验证。
+> 执行说明：2026-10-18 用户已授权开始源码核对和不依赖集群的核心开发，继续禁止安装/部署。本轮已完成 T03 静态核对及本地核心实现，使用现有 JDK/Maven 和缓存执行测试；未委派子代理、未提交/推送。历史环境 NO_GO 继续约束运行实验，不作为本地核心开发的前置阻塞。
 
 **目标：** 冻结一个可以实际构建、扫描和运行的发行组合，并证明合法文件集合、封存恢复和失败废弃路径可判定，作为进入 P1 的依据。
 
@@ -10,7 +10,7 @@
 
 **设计依据：** [YAML 批处理服务设计 v0.2](../../design/flink-yaml-batch-service-design.md)，重点为第 3、4、7、8、10、14、15、16 节。基准提交 `89a6c1e`，设计文件 SHA-256：`fff41e1fbe958dbec7c1490c2a76633dc72d60ea9077957771c4c042f8818291`。
 
-**计划版本：** 0.1，2026-10-18。**状态更新：** 2026-10-18，T01/T02 已完成只读盘点，任务部分完成、尚未验收，整体为 `evidence_incomplete`；F01–F13 均为 `NOT_RUN`。检查结果见 [T01 环境清单](../../p0/environment-and-fixtures.md) 与 [T02 版本清单](../../p0/version-lock.md)。环境安装、部署与构建补齐均未实施，复用建议未自动替换第 2 节候选。
+**计划版本：** 0.2，2026-10-18。**状态更新：** 2026-10-18，T01/T02 已完成只读盘点，任务部分完成、尚未验收，整体为 `evidence_incomplete`；F01–F13 均为 `NOT_RUN`。检查结果见 [T01 环境清单](../../p0/environment-and-fixtures.md) 与 [T02 版本清单](../../p0/version-lock.md)。环境安装、部署与完整发行构建补齐均未实施，复用建议未自动替换第 2 节候选。本地核心已按本文第 10 节完成有限构建验证。
 
 **E01 补充：** 共享 CRD 对比、Operator/ZIO 范围核对和候选 Chart 离线渲染已完成。2026-10-18 14:43:48–14:58:54（Asia/Shanghai）的联合只读观测持续 905.78 秒，共 62 组样本，结论为 **单 Application 资源准入 `NO_GO`**：宿主机 Warning、反复换出及 CPU/load 超线，两处磁盘末值均不足 36 GiB；合格稳定窗口为 0 秒。节点工作集峰值 4.589 GiB 已超过原 4 GiB 基线；加单 Application + 外部 S3 的 4.875 GiB 和 2 GiB 机动空间，合计约 11.464 GiB，仅余 0.271 GiB。详细证据及剩余条件见 [环境清单](../../p0/environment-and-fixtures.md)第 6.2.1–6.2.2 节，重算见第 6.4 节。E01 尚未整体验收，实际预检仍为 NOT_RUN；观测完成不替代 E02 实际隔离和 T05–T07 作业/文件验收。
 
@@ -26,7 +26,7 @@
 - 只接受真实提交证据、成功终态和完整内容核验的联合证明；不得把目录扫描、日志成功字样或单独 FINISHED 当成封存依据。
 - P0 只做两份 PostgreSQL JDBC 固定输入、一个 PostgreSQL 目标和一种内部存储的最小验证。三类新增 Source 的实现与实测在 P4。
 - 本计划不授权部署或故障注入到生产；实验只能使用已确认的隔离测试范围、合成数据和专属对象前缀。
-- 后续执行计划不自动包含提交、推送或发布；这些操作按届时明确授权执行。本轮不创建代码、POM、镜像、CR 或测试脚本。
+- 后续执行计划不自动包含提交、推送或发布；这些操作按届时明确授权执行。本轮允许核心代码、POM 和本地单元测试；不创建镜像、CR 或执行安装/部署。
 
 ### 本轮拆分结果
 
@@ -41,7 +41,7 @@
 | T07 故障与恢复实验 | P0-4、P0-5 | A12/A26/A27/A33 对应实验及否决项结果 | T06 |
 | T08 发行冻结与 P0 评审 | P0-1 至 P0-5 | 同一发行组合的 GO/NO_GO 结论 | T01–T07 |
 
-关键路径为 T01 → T02 → T03 → T04/T05 → T06 → T07 → T08。T03 是静态可行性关口，T05 建立实验制品，T06 才验证该接口路径是否实际可行。T03 不通过时停止后续文件链路实现，先评审提交方案；不要先做完整服务再发现核心证据不可取得。
+实际运行验收的关键路径为 T01 → T02 → T03 → T04/T05 → T06 → T07 → T08。静态源码核对可先用官方固定 commit 开展；严格解析、参数绑定和纯恢复判定可独立开发，不以环境准入为前置条件。T03 是静态可行性关口，T05 建立实验制品，T06 才验证该接口路径是否实际可行。T03 不通过时停止后续文件链路实现，先评审提交方案；不要先做完整服务再发现核心证据不可取得。
 
 ### 重点复核的五种失败输入
 
@@ -106,7 +106,7 @@ Kubernetes、存储产品、镜像 digest、Parquet/Hadoop/SDK 传递版本不�
 | `docs/p0/file-commit-protocol.md` | T03/T04：源码定位、证据字段来源、终结规则、故障窗口及否决结论 |
 | `docs/p0/platform-contracts.md` | T04：最小平台对象、恢复判定、目标事务与资源档位 |
 | `docs/p0/acceptance-report.md` | T06–T08：逐实验结果、执行记录引用、最终 GO/NO_GO |
-| `pom.xml`、`Dockerfile` | T05：单工程打包及固定镜像，尚未创建 |
+| `pom.xml`、`Dockerfile` | 已创建核心库 POM；Dockerfile、fat JAR 和真实双入口仍待 T05 |
 | `src/main/java/io/github/xuxiaotuan/magicflink/app/ServiceMain.java`、`RunnerMain.java` | T05：真实依赖和入口的最小贯通，不伪称完整服务 |
 | `src/test/java/io/github/xuxiaotuan/magicflink/p0/PackagingSmokeIT.java`、`FileCommitProtocolIT.java`、`MetadataRecoveryIT.java` | T05–T07：打包、文件协议、元数据协议验证；实验名称见后文 |
 | `src/test/resources/p0/` | T05–T07：合成数据、隔离部署模板及故障场景描述 |
@@ -145,16 +145,18 @@ Kubernetes、存储产品、镜像 digest、Parquet/Hadoop/SDK 传递版本不�
 
 **负责人角色：** Flink/存储研发。**输入：** T02 的精确 Flink 和 S3 插件。**输出：** file-commit-protocol.md 中的接口路径、字段来源表与技术可行性结论。
 
-- [ ] 阅读固定 tag 的 FileSink、FileWriter、FileSinkCommittable、FileCommitter、对应 PendingFileRecoverable 和 S3 RecoverableWriter；记录源码 commit 和方法定位。
-- [ ] 逐项确认能否获得实际最终对象键、task attempt 身份、已接受的提交结果、writer 结束标记，以及输入逻辑分片完成信息。标记每个字段来自原生运行时、适配器还是固定计划。
-- [ ] 首选薄封装：复用原生文件提交，捕获可证明已成功的提交结果，再生成 CommitEvidence。可以隔离固定版本的 Internal API 依赖，但必须列清升级成本；不使用反射猜私有字段、日志解析或目录枚举兜底。
-- [ ] 说明聚合终结条件：预期 writer 集合及其结束证据齐全、每份预期提交有成功证明、无未判定请求，并与最终被接受的 task attempt 对齐。writer 无输出也必须完成；输入分片数不能替代 writer 数。
-- [ ] 区分“有一个提交成功”与“完整集合已经成功”；不能在遍历一批提交请求的中途就发布全局索引。说明同文件重复提交如何归一，以及错误内容重复如何拒绝。
-- [ ] 明确证据聚合位置、持久化时点及失败处理；记录能否在不 fork Flink 的情况下完成最小原型。若仅能取得待提交对象而拿不到成功/胜出语义，结论为 NO_GO，返回提交方案评审。
+- [x] 阅读固定 tag 的 FileSink、FileWriter、FileSinkCommittable、FileCommitter、对应 PendingFileRecoverable 和 S3 RecoverableWriter；记录源码 commit 和方法定位。
+- [x] 逐项确认能否获得实际最终对象键、task attempt 身份、已接受的提交结果、writer 结束标记，以及输入逻辑分片完成信息。标记每个字段来自原生运行时、适配器还是固定计划。
+- [x] 首选薄封装：复用原生文件提交，捕获可证明已成功的提交结果，再生成 CommitEvidence。可以隔离固定版本的 Internal API 依赖，但必须列清升级成本；不使用反射猜私有字段、日志解析或目录枚举兜底。
+- [x] 说明聚合终结条件：预期 writer 集合及其结束证据齐全、每份预期提交有成功证明、无未判定请求，并与最终被接受的 task attempt 对齐。writer 无输出也必须完成；输入分片数不能替代 writer 数。
+- [x] 区分“有一个提交成功”与“完整集合已经成功”；不能在遍历一批提交请求的中途就发布全局索引。说明同文件重复提交如何归一，以及错误内容重复如何拒绝。
+- [x] 明确证据聚合位置、持久化时点及失败处理；记录能否在不 fork Flink 的情况下完成最小原型。若仅能取得待提交对象而拿不到成功/胜出语义，结论为 NO_GO，返回提交方案评审。
 
 **已查明的源码事实：** 1.20.5 的 FileSinkCommittable 和 FileCommitter 标记为 Internal；committable 还包含清理类消息。FileCommitter 对 pending 文件调用恢复后的提交方法，不能将每条 committable 都计为成功数据文件。[FileSinkCommittable](https://github.com/apache/flink/blob/release-1.20.5/flink-connectors/flink-connector-files/src/main/java/org/apache/flink/connector/file/sink/FileSinkCommittable.java)、[FileCommitter](https://github.com/apache/flink/blob/release-1.20.5/flink-connectors/flink-connector-files/src/main/java/org/apache/flink/connector/file/sink/committer/FileCommitter.java)。
 
 **验收：** 字段来源和终结条件能对应具体接口，形成可在 T05/T06 验证的薄封装方案，结论为 GO_TO_SPIKE 或 NO_GO。前者只允许进入原型实验，不证明实际可产出完整集合；后者应返回设计评审。若需要修改 Flink 本体或另起通用事务日志，也暂停并返回评审，不把它作为普通实现细节追加。
+
+**2026-10-18 执行结果：GO_TO_SPIKE（静态）。** 官方 tag 对应 commit `0980485040c6dbec3a1b32da05c4b655cf01ad2b`；详见 [T03 报告](../../p0/file-commit-protocol.md)。已区分公开 Path、包可见 recoverable、成功提交通道、原 writer attempt 与 committer identity；输入分片证据必须由 Source 另行提供。胜出 attempt 的运行语义、序列化和真实 S3 聚合未验证。T03 勾选只表示源码核对项完成，不表示 T05–T07 通过。
 
 ### T04：冻结对象与恢复判定合同
 
@@ -324,8 +326,25 @@ executionId、时间、操作者、测试制品/镜像 digest、配置摘要、�
 
 P0 GO 仅表示可以开始 P1。它不表示 HTTP/BQ/ClickHouse 已支持、完整取消/恢复 API 已完成、四源业务 E2E 已通过，或已达到生产 SLA。P1 必须在真实 Service 中重新验证 A12/A26/A27/A33，并补齐其余本阶段用例。
 
-## 9. 本轮交付与后续起点
+## 9. 环境观测阶段的交付与后续起点（历史记录）
 
-已交付本计划、T01/T02 检查、E01 范围核对、15 分钟联合观测结果、NO_GO 缺口与内存预算重算，以及 README 入口；v0.2 主设计保持原文。当前仓库尚无构建工程，未安装、部署或运行 P0 实验，监控与停止规则也未实现。T01/T02 尚未通过任务验收，所有任务验收复选框保持未勾选。
+已交付本计划、T01/T02 检查、E01 范围核对、15 分钟联合观测结果、NO_GO 缺口与内存预算重算，以及 README 入口；v0.2 主设计保持原文。当时仓库尚无构建工程，未安装、部署或运行 P0 实验，监控与停止规则也未实现。T01/T02 尚未通过任务验收，当时所有任务验收复选框保持未勾选。
 
 后续按 T01 的 E01–E06 与 T02 的 V01–V06 补齐剩余缺口：等待既有重负载自然结束，在拟定实验时段重新取得合格稳定窗口；只读核对磁盘增长归属并确定获准的容量处理方案，分别满足两处剩余增长 + 25 GiB 条件；复核更新后的内存基线和最终资源清单，确认具体责任人、预算与停止阈值、外部 S3 身份，并继续核验制品来源和扫描渠道。此次文档更新不执行清理、安装或部署。完整 P0 仍须解决双 Application 和故障重叠容量，不能把单 Application 预检作为替代。最终清单复查和准入通过后，才在后续授权范围内补齐专属环境。期间可继续带条件的 T03 源码研究，不据此勾选真实环境验收。
+
+
+## 10. 2026-10-18 本地核心实施记录
+
+本轮从环境检查转入代码开发；不调整 v0.2 的设计合同或 G1–G6 门槛。
+
+| 范围 | 本轮结果 | 后续关口 |
+|---|---|---|
+| T03 源码核对 | GO_TO_SPIKE；固定 tag/commit、字段来源、薄封装路径和否决条件已记录 | T05 编译、T06/T07 真实提交和故障实验 |
+| YAML 与参数绑定（提前实现 P1 的纯逻辑） | 严格解析、冻结 decimal 规则、完整示例和反例测试 | 数据集授权/版本解析、Schema、SQL Planner、ResolvedRunSpec 摘要和受理 API |
+| T04 恢复策略的纯逻辑部分 | 迟到回执、并发 revision、取消隔离和文件封存恢复判定已实现 | 不可变证据读取、原子对象写入、数据库事务、真实并发与发布合同 |
+| 本地构建 | 现有 Java 17/Maven，离线 package；64 tests、0 failures/errors/skipped | 不是 T05 fat JAR、双入口或扫描完成 |
+| T01/T02、T05–T08 与 F01–F13 | 原状态保留；集群运行实验仍 NOT_RUN | 环境实际准入及各自验收证据 |
+
+[平台核心合同](../../p0/platform-contracts.md)列出判定表、测试命令、边界和证据。先写测试再实现；首轮 RED 是缺少待实现类型的编译失败，不能当作行为验证。后续三个语义回归先取得真实断言失败，再修正并通过：decimal 规则漂移、RUNNING/已停止矛盾、封存前成功回执。
+
+接下来可继续本地 SQL Planner/类型规划和对象摘要合同，不需反复资源观测；完整文件适配器和数据库协议按真实证据分阶段接入。首次发布尚未实现，F12/F13 和全链路验收仍保留。不能把单元测试中的可信事实枚举当成实际 Flink/S3/数据库已经提供这些事实。

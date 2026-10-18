@@ -2,7 +2,7 @@
 
 **检查日期：** 2026-10-18。**清单状态：** `NOT_FROZEN / evidence_incomplete`。T02 只读盘点已完成，制品核验、完整依赖解析和准入尚未完成，T02 未验收。
 
-本文保留基于项目提交 `76f7739` 的本地版本、制品摘要与官方元数据检查，并补充基于 `1225e2a` 的 E01 Chart/CRD 静态核对。关联：[环境与固定数据](environment-and-fixtures.md)、[P0 计划](../superpowers/plans/2026-10-18-p0-baseline-and-file-commit-validation.md)。本轮只整理前轮证据；复用建议不是对原计划候选的正式替换，T08 才能形成通过验收的 ReleaseManifest。
+本文保留基于项目提交 `76f7739` 的本地版本、制品摘要与官方元数据检查，并补充基于 `1225e2a` 的 E01 Chart/CRD 静态核对。关联：[环境与固定数据](environment-and-fixtures.md)、[P0 计划](../superpowers/plans/2026-10-18-p0-baseline-and-file-commit-validation.md)。主体章节整理前轮证据；本轮核心构建新增证据见第 6 节；复用建议不是对原计划候选的正式替换，T08 才能形成通过验收的 ReleaseManifest。
 
 ## 1. 原候选与本机现状
 
@@ -97,3 +97,20 @@ V01 的本地工具选择可以先于环境部署完成；V03 的共享资源静
 因此 T02 未通过，G1 版本冻结仍为 `evidence_incomplete`；运行所需的 Operator、专属数据库和对象存储尚未就绪，相关实验为 `external_blocked / NOT_RUN`。此标记表示环境前提缺失，不表示本轮“未安装”的范围约束是一项失败。F01–F13 均未执行，G2–G6 无新增通过证据。
 
 后续可以针对 1.20.5 开展带条件的 T03 静态研究，但应记录其候选制品尚未冻结，正式接口结论须绑定最终采用的准确制品和源码。只有 T01/T02 的缺口补齐并满足原验收标准后，才能把后续运行任务标记为具备执行条件。
+
+
+## 6. 2026-10-18 本地核心构建组合（不冻结运行发行版）
+
+本次复用已有工具及 `~/.m2` 缓存，不安装 JDK/Maven，不修改默认 PATH、不下载构建依赖、不使用本机 Flink 分发 JAR。`mvn -o package` 成功只证明下列核心代码组合可本地构建，未取代上述 T02 运行制品和扫描关口。
+
+| 用途 | 精确版本/坐标 | 本轮证据 |
+|---|---|---|
+| JDK | Microsoft 17.0.14，aarch64 | 子进程 JAVA_HOME 指定已有目录；实际 compile/test/package 成功 |
+| Maven | 3.9.16，build 2bdd9fddda4b155ebf8000e807eb73fd829a51d5 | `/opt/homebrew/bin/mvn -version`，全程 offline |
+| 唯一核心运行依赖 | org.yaml:snakeyaml:2.6 | 本地 JAR 与 Central SHA-1 相符；仅 compose 节点，不反序列化 Java 对象 |
+| 测试 | org.junit.jupiter:junit-jupiter:5.11.4 | 64 个测试通过，测试依赖不进入普通应用 JAR |
+| Maven 插件 | resources 3.3.1 / compiler 3.13.0 / surefire 3.5.3 / jar 3.4.2 | 已写入 POM，缓存闭包支持离线 package |
+
+SnakeYAML JAR SHA-256：`c8f7a98e7394adda02f6317249710e4d1b4c7a25aa8c7eace0c2eea52eb8bf85`；本地与[官方 SHA-1](https://repo.maven.apache.org/maven2/org/yaml/snakeyaml/2.6/snakeyaml-2.6.jar.sha1)均为 `2bc14918a2f8d5414749ab12d0c590cd3198b8c1`。此校验是来源对照，不能代替签名、漏洞扫描和行内准入。JUnit/插件运行成功不代表整个缓存已验签。
+
+T03 固定 Flink 源码 commit 和接口范围见[源码核对](file-commit-protocol.md)。当前 POM 未引入 Flink、JDBC、Parquet、S3 SDK；不代表最终发行依赖闭包已齐。当前 JAR 为开发中的核心库，不能部署或当作已扫描 fat JAR 提交。
