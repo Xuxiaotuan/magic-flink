@@ -125,3 +125,8 @@ T03 固定 Flink 源码 commit 和接口范围见[源码核对](file-commit-prot
 实际 Surefire classpath 共 63 个 JAR，21 个非 shaded Flink JAR 全部为 1.20.5，未混入 planner-loader；文件名与 SHA-256 清单存于忽略目录 `target/local-planner-classpath.tsv`。本轮 offline dependency:tree 因插件自己的 plexus-io/maven-dependency-analyzer 闭包不全而失败；未补装插件，转而检查实际测试 classpath，不能据此宣称最终发行依赖树/SBOM 已完成。
 
 普通 Planner 方案要求最终固定镜像向 Service/Runner 都提供相同的 Planner/API/runtime 组合，尚未验证镜像 SPI/类加载。当前普通应用 JAR 不包含 Flink/Calcite 类；T05 单 fat JAR 双入口和 T08 扫描/ReleaseManifest 仍未完成。实现使用 Internal API，改版必须重跑 [SQL 与摘要合同](sql-and-digest-contracts.md)中的能力负例。
+
+
+## 8. T04 领域与本地存储构建补充
+
+本批没有新增依赖或修改 POM，复用 Java 17.0.14、Maven 3.9.16、SnakeYAML 2.6 与 provided Flink Planner 1.20.5，全部使用 offline 编译/测试/package。安全元数据解码使用既有 SnakeYAML SafeConstructor 加规范字节复核；本地存储仅使用 JDK NIO。测试增加两个各 64 MiB、1 CPU 的短生命周期 JVM 验证真实本地争写，不启动外部服务。170 项本地测试的具体证据见 [T04 合同](domain-and-local-storage-contracts.md)；这不是新的运行发行冻结或扫描通过。

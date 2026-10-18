@@ -32,6 +32,23 @@ public final class ObjectDigests {
         public String sha256() { return digest; }
     }
 
+    // New domain shapes have a new envelope; canonical-v1 golden vectors remain unchanged.
+    static Frozen domain(String kind, Map<String, ?> content) {
+        return new Frozen(CanonicalJson.encode(Map.of("protocol", "magic-flink-domain-v2", "kind", kind, "content", content)));
+    }
+    public static Frozen restoreCanonical(byte[] bytes, String expectedDigest) {
+        digest(expectedDigest);
+        if (!expectedDigest.equals(CanonicalJson.sha256(bytes))) throw new IllegalArgumentException("stored content digest mismatch");
+        Object parsed = CanonicalJson.decode(bytes);
+        if (!(parsed instanceof Map<?, ?> envelope) || !envelope.keySet().equals(Set.of("protocol", "kind", "content"))
+                || !(envelope.get("content") instanceof Map<?, ?>) || !(envelope.get("kind") instanceof String kind))
+            throw new IllegalArgumentException("invalid immutable envelope");
+        if ("magic-flink-canonical-v1".equals(envelope.get("protocol"))) Kind.valueOf(kind);
+        else if (!"magic-flink-domain-v2".equals(envelope.get("protocol")) || !Set.of("PLATFORM_CATALOG", "RESOLVED_RUN_SPEC", "JDBC_READ_FILTER", "CONSUMED_INPUTS", "SPLIT_READ_PLAN", "STAGE_PLAN", "COMMIT_EVIDENCE", "INPUT_MANIFEST", "CANDIDATE_MANIFEST", "STAGE_RECEIPT", "TERMINAL_OBSERVATION").contains(kind))
+            throw new IllegalArgumentException("unknown immutable protocol/kind");
+        return new Frozen(bytes);
+    }
+
     public record DatasetVersion(String dataset, String version, String schemaDigest) {
         public DatasetVersion { text(dataset); text(version); digest(schemaDigest); }
         private Map<String, Object> fields(Object batch) {
@@ -166,7 +183,7 @@ public final class ObjectDigests {
         return result;
     }
 
-    private static Map<String, Object> identity(StageIdentity identity) {
+    static Map<String, Object> identity(StageIdentity identity) {
         var fields = new LinkedHashMap<String, Object>();
         fields.put("runId", identity.stage().runId()); fields.put("stageType", identity.stage().type().name());
         fields.put("inputAlias", identity.stage().inputAlias().orElse("")); fields.put("stageAttemptId", identity.attemptId());
@@ -219,12 +236,7 @@ public final class ObjectDigests {
         return List.copyOf(sorted.values());
     }
     private static void objectKey(String key, boolean prefix) {
-        URI uri = URI.create(key);
-        if (!"s3".equals(uri.getScheme()) || uri.getHost() == null || !uri.getHost().equals(uri.getHost().toLowerCase(Locale.ROOT))
-                || uri.getUserInfo() != null || uri.getPort() != -1 || uri.getQuery() != null || uri.getFragment() != null
-                || !uri.normalize().equals(uri) || !uri.toASCIIString().equals(key) || uri.getPath() == null
-                || !uri.getPath().matches("/[A-Za-z0-9_./-]+") || uri.getPath().contains("//") || uri.getPath().endsWith("/") != prefix)
-            throw new IllegalArgumentException("noncanonical internal S3 object key");
+        if (prefix) ObjectKeys.prefix(URI.create(key)); else ObjectKeys.file(URI.create(key));
     }
     private static void nonemptyMap(Object value) { if (!(value instanceof Map<?, ?> map) || map.isEmpty()) throw new IllegalArgumentException("nonempty version map required"); }
     private static String text(Object value) { if (!(value instanceof String s) || s.isBlank()) throw new IllegalArgumentException("nonblank identity required"); return s; }

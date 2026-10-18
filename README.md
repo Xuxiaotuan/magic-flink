@@ -2,13 +2,15 @@
 
 基于 Flink Kubernetes Operator 的自研 YAML 有界批处理服务。用户只编写 YAML，平台统一构建、测试和扫描 fat JAR，规划支持多源采集、SQL Join、前后置检查与验收后发布。
 
-已开始核心逻辑开发：T03 源码核对完成，静态结论为 **GO_TO_SPIKE**；严格 YAML 解析、类型化参数绑定、SQL Planner 校验、规范化对象摘要、迟到回执与文件封存恢复判定已实现。本地 126 个测试通过，尚未实现可提交任务的完整服务或完成集群运行验收。
+已开始核心逻辑开发：T03 源码核对完成，静态结论为 **GO_TO_SPIKE**；严格 YAML 解析、类型化参数绑定、SQL Planner 校验、规范化对象摘要、P0 平台领域与冻结运行校验、计划/提交证据交叉核验、本地不可变元数据存储、迟到回执与文件封存恢复判定已实现。本地 170 个测试通过，尚未实现可提交任务的完整服务或完成集群运行验收。
 
 ## 本地核心与验证
 
 - `spec`：严格 YAML、参数绑定和 Flink 1.20.5 本地 SQL 规划，核对表/函数/Join 能力与输出 Schema。
-- `protocol`：七类对象的规范化 UTF-8 JSON 和 SHA-256，明确排序、类型、提交身份和恢复字段。
+- `protocol`：版本化平台配置、ResolvedRun、StagePlan 与提交证据的交叉校验，以及兼容 canonical-v1 的 domain-v2 完整领域摘要。
+- `connectors`：本地 POSIX 不可变元数据存储，同键同内容幂等、异内容冲突，读取错误不当作不存在。
 - `control`：逻辑阶段身份、回执接纳和封存恢复的纯判定；不访问 Kubernetes、数据库或对象存储。
+- [T04 领域与本地存储合同](docs/p0/domain-and-local-storage-contracts.md)：字段、交叉核验、原子发布、故障恢复及测试边界。
 - [SQL Planner 与摘要合同](docs/p0/sql-and-digest-contracts.md)：支持范围、字段、黄金向量、保守拒绝条件和构建依赖。
 - [核心合同、测试与边界](docs/p0/platform-contracts.md)：本轮实际实现、恢复判定表和剩余集成关口。
 - [T03 文件提交源码核对](docs/p0/file-commit-protocol.md)：固定 Flink commit、字段来源和原型路径；GO_TO_SPIKE 不等于运行 PASS。

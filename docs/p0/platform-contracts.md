@@ -1,6 +1,6 @@
 # 本地核心合同与验证记录
 
-2026-10-18，依据设计 v0.2 和 P0 T03/T04。已完成 T03 静态核对、YAML 与恢复判定；本轮新增本地 SQL Planner 和对象摘要。**这是 T04 的部分实现及 P1 的部分前置逻辑，不是完整 P0 或完整服务。**
+2026-10-18，依据设计 v0.2 和 P0 T03/T04。已完成 T03 静态核对、YAML 与恢复判定；后续新增本地 SQL Planner、对象摘要，以及本批领域校验/交叉核验/本地存储。**这是 T04 的部分实现及 P1 的部分前置逻辑，不是完整 P0 或完整服务。**
 
 ## 1. 已实现的代码
 
@@ -12,9 +12,14 @@
 | [ReceiptGate](../../src/main/java/io/github/xuxiaotuan/magicflink/control/ReceiptGate.java) | 当前资格、取消、revision、证据完整性、幂等重复/冲突的纯判定 | 没有数据库事务或实际状态推进 |
 | [SqlPlannerValidator](../../src/main/java/io/github/xuxiaotuan/magicflink/spec/SqlPlannerValidator.java) | 同版 Flink 语法/名称/类型、AST 和关系计划能力、输出 Schema、运行 integer 范围 | 本地规划，不执行查询；表/参数 Schema 由平台提供 |
 | [ObjectDigests](../../src/main/java/io/github/xuxiaotuan/magicflink/protocol/ObjectDigests.java) | Schema/定义/绑定/阶段计划/提交证据/清单/回执的规范化身份 | 最小共同摘要合同，不授予封存或发布资格 |
+| [PlatformDefinitions](../../src/main/java/io/github/xuxiaotuan/magicflink/protocol/PlatformDefinitions.java) | P0 连接、源/目标、运行档位、登记规则和版本/权限/预算关系 | 不是实际数据库授权或全局资源预留 |
+| [ResolvedRun](../../src/main/java/io/github/xuxiaotuan/magicflink/protocol/ResolvedRun.java) | 全部配置版本、参数/批次、主体、检查列和真实 Planner 的组合校验 | 不提供 HTTP 受理或持久注册表 |
+| [FileStageProtocol](../../src/main/java/io/github/xuxiaotuan/magicflink/protocol/FileStageProtocol.java) | 计划/原生接纳集合/提交/分片/终态/清单关系 | 上游须实际生产可信事实，不代替原生适配或 SEALED 事务 |
+| [DomainSnapshots](../../src/main/java/io/github/xuxiaotuan/magicflink/protocol/DomainSnapshots.java) | domain-v2 完整领域载荷与摘要 | 保留 canonical-v1，详细编码见 T04 合同 |
+| [LocalImmutableObjectStore](../../src/main/java/io/github/xuxiaotuan/magicflink/connectors/LocalImmutableObjectStore.java) | 本地不可变元数据写入、核验读取和重开 | 专属 POSIX 目录；不是 S3、Parquet 或数据库适配器 |
 | [SealRecovery](../../src/main/java/io/github/xuxiaotuan/magicflink/control/SealRecovery.java) | 从持久终态、证据、文件核验和封存观察选择下一步 | 不生成真实 CommitEvidence，不读写文件或数据库 |
 
-采用单 Maven 工程，同版普通 Flink Planner 为 provided 依赖；未引入 Web 框架、调度器、仓储抽象、内存数据库、插件体系或新进程。未来 Service/Runner 仍进入同一工程与统一测试扫描的 fat JAR，不接受用户 JAR。
+采用单 Maven 工程，同版普通 Flink Planner 为 provided 依赖；未引入 Web 框架、调度器、仓储抽象、内存数据库、插件体系；测试仅额外启动受限测试 JVM 验证本地跨进程争写。未来 Service/Runner 仍进入同一工程与统一测试扫描的 fat JAR，不接受用户 JAR。
 
 ## 2. YAML 与参数合同
 
@@ -52,7 +57,7 @@ StageIdentity 还包含 attemptId、执行器、资源身份及三个固定摘�
 
 ## 4. 文件封存恢复判定
 
-Observation 必须绑定同一 StageIdentity 和对应证据内容。COMPLETE 包括合法文件集合、全部 writer（包括零输出）和输入分片完成，不是文件数非零；VALID 表示逐文件内容/大小/行数/Schema 已核对；MATCHING 表示内容摘要和身份一致，不只是对象存在。生成这些观察的 I/O 适配器尚未实现。
+Observation 必须绑定同一 StageIdentity 和对应证据内容。COMPLETE 包括合法文件集合、全部 writer（包括零输出）和输入分片完成，不是文件数非零；VALID 表示逐文件内容/大小/行数/Schema 已核对；MATCHING 表示内容摘要和身份一致，不只是对象存在。本批已实现本地元数据 I/O 和计划/提交集合交叉核验；真实原生提交、文件内容扫描及数据库观察适配器仍待实现。
 
 | 观察 | 下一步 |
 |---|---|
@@ -104,7 +109,7 @@ MAVEN_OPTS='-Xmx256m -XX:ActiveProcessorCount=2' \
 
 ## 6. 尚未完成的验收
 
-- T04 的 ConnectionProfile/DatasetDefinition/RuntimeProfile 完整合同、摘要载荷的完整领域核验、原子对象写入、事务 CAS、首次发布唯一键初始化/历史去重及并发验证。
+- T04 的真实配置能力核实、S3 条件写/读取语义、事务 CAS、首次发布唯一键初始化/历史去重及数据库并发验证。本批已补齐 P0 PostgreSQL 领域字段、交叉核验和本地原子不可变元数据存储，详见第 8 节。
 - T05 的双入口、真实 Flink/Planner/JDBC/Parquet/S3 依赖闭包、fat JAR、SBOM/扫描及固定镜像。
 - T06/T07 的合法文件集合、失败 task 排除、零行、多文件、内容核验、真实存储故障和 F01–F13。
 - P1 的服务受理、权限、完整检查 Schema/运行能力受理、协调器及持久化；四源采集和业务 Join 仍按原阶段推进。
@@ -112,10 +117,21 @@ MAVEN_OPTS='-Xmx256m -XX:ActiveProcessorCount=2' \
 因此当前状态为“本地核心测试通过，运行/事务证据 evidence_incomplete”。T03 为 GO_TO_SPIKE，环境准入仍 NO_GO。后续可继续本地开发，不重复把环境检查当作所有代码工作的前置条件。
 
 
-## 7. 第二批：本地 Planner 与摘要（当前，126 项）
+## 7. 第二批：本地 Planner 与摘要（历史，126 项）
 
 新增实现和严格能力范围见 [SQL Planner 与对象摘要合同](sql-and-digest-contracts.md)。本轮补足真实 Flink 本地规划及 canonical-v1，共 126 个测试（YAML 46、SQL 37、摘要 25、恢复 18）；2026-10-18 16:14:21 最终 `mvn -o package` 退出码 0，126 tests / 0 failures / 0 errors / 0 skipped；普通应用 JAR 含 47 个应用 class，不含 Flink/Calcite 和测试类。
 
 七类摘要覆盖 Schema、JobDefinition、ResolvedRunSpec、StagePlan、CommitEvidence、Manifest、StageReceipt。输入/输出配置版本、参数类型、逻辑阶段和外部身份被纳入身份；文件列表排序、重复身份拒绝、UTC 时间和恢复稳定性已测试。数据库 SEALED 状态与恢复进程当前时间不进入不可变内容。摘要不证明文件内容实际正确，也不代替事务 CAS。
 
 测试复用现有工具；普通 Planner 依赖经 Maven 正常解析，后续支持离线构建。测试堆上限调整为 384 MiB、单 fork、2 个处理器，Maven 上限仍为 256 MiB；未启动集群/数据库、未安装/部署，未提交或推送。
+
+
+## 8. 第三批：T04 领域与本地存储（当前，170 项）
+
+详见 [T04 领域与本地存储合同](domain-and-local-storage-contracts.md)。新增 PlatformDefinitions、ResolvedRun、FileStageProtocol、DomainSnapshots、ObjectKeys、LocalImmutableObjectStore，补齐 P0 PostgreSQL 全部本批字段、明确版本/权限/预算、绑定值/检查 Schema/Planner 校验、完整预期 writer/split 与原生接纳提交集合核对。成功清单还须匹配持久终态与逐文件核验引用；COMPUTE 不能漏输入或读取其他运行目录。
+
+完整领域载荷使用 magic-flink-domain-v2，原 canonical-v1 和黄金向量不变；新增规范内容解码、可信摘要与协议校验。实际本地存储覆盖同键幂等/冲突、发布前后异常恢复、错误不当不存在，以及跨实例/两个 JVM 争写。本地对象内容链经过持久化、重开与回读，不是内存 Map 模拟。
+
+新增 44 项，加原有 126 项，共 170 项。构建命令沿用第 5 节，Surefire 单 fork/384 MiB/2 CPU，跨进程测试的两个子 JVM 各 64 MiB/1 CPU。最终 package 证据登记在详细合同中。未新增依赖或改变 POM，未安装、部署、暂存、提交或推送。
+
+本批是本地合同和元数据 I/O 验收；真实 Source/FileSink/Parquet/S3、元数据库事务和目标发布仍 evidence_incomplete。登记权限、源端不可变声明及类型化事实不是运行证明；不会仅靠构造器生成 SEALED 资格或将 receipt 直接推进运行。

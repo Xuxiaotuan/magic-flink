@@ -1,6 +1,6 @@
 # 本地 SQL Planner 校验与对象摘要合同
 
-2026-10-18，依据 v0.2 第 4、5.5、5.6、7、8 节及 P0 T04/T05。此文记录本轮实际实现；T03 的 GO_TO_SPIKE 结论、环境运行准入与 F01–F13 状态不变。
+2026-10-18，依据 v0.2 第 4、5.5、5.6、7、8 节及 P0 T04/T05。此文记录第二批实现；完整领域载荷和本地对象 I/O 的后续补充见 [T04 合同](domain-and-local-storage-contracts.md)。T03 的 GO_TO_SPIKE 结论、环境运行准入与 F01–F13 状态不变。
 
 ## 1. SQL 校验入口与执行边界
 
@@ -120,3 +120,8 @@ InputManifest/CandidateManifest 的完整源协议、投影/时区/令牌/业务
 
 
 最终验证：2026-10-18 16:14:21（Asia/Shanghai），`mvn -o package` 退出码 0，126 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS。普通应用 JAR 含 47 个应用 class、不含 Flink/Calcite 或测试类；本轮 Markdown 本地链接检查与 `git diff --check` 通过，设计 v0.2 SHA-256 仍为 `fff41e1fbe958dbec7c1490c2a76633dc72d60ea9077957771c4c042f8818291`。编译存在 Calcite 可选 apiguardian 注解缺失警告，测试使用 SLF4J NOP 日志；这些警告不影响本次构建结果，最终镜像的注解/日志依赖仍由 T05 统一核验。
+
+
+## 7. 后续 T04 补充
+
+本批新增 P0 PostgreSQL 完整领域字段、ResolvedRun 与真实 Planner 的组合校验、预期 writer/split/输入版本/批次/任务身份交叉核验，以及本地不可变元数据存储。完整载荷使用 magic-flink-domain-v2；本页 canonical-v1 仍是原最小共同合同，黄金向量不变，不能用旧 freeze 接口绕过新领域校验。具体字段、生产来源义务和恢复语义见 [T04 领域与本地存储合同](domain-and-local-storage-contracts.md)。本页“未实现”描述为第二批历史状态，当前范围以该合同及平台合同第 8 节为准。

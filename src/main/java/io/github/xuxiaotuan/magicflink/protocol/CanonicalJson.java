@@ -10,6 +10,11 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
+import java.io.StringReader;
+import java.nio.ByteBuffer;
+import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.LoaderOptions;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 /** Project canonical-v1, not RFC 8785: exact decimals are strings, integers remain JSON integers. */
 public final class CanonicalJson {
@@ -27,6 +32,25 @@ public final class CanonicalJson {
     public static String sha256(byte[] bytes) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)); }
         catch (NoSuchAlgorithmException e) { throw new IllegalStateException("SHA-256 required by Java", e); }
+    }
+    /** JSON emitted by this codec only; rejects noncanonical spellings, duplicate keys and lossy values. */
+    public static Object decode(byte[] bytes) {
+        if (bytes == null || bytes.length == 0 || bytes.length > MAX_BYTES) throw new IllegalArgumentException("canonical content size invalid");
+        try {
+            String text = StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString();
+            LoaderOptions options = new LoaderOptions(); options.setAllowDuplicateKeys(false); options.setMaxAliasesForCollections(0);
+            options.setNestingDepthLimit(64); options.setCodePointLimit(MAX_BYTES);
+            Object parsed = new Yaml(new SafeConstructor(options)).load(new StringReader(text));
+            if (!Arrays.equals(bytes, encode(parsed))) throw new IllegalArgumentException("noncanonical JSON");
+            return immutable(parsed);
+        } catch (Exception e) { throw new IllegalArgumentException("invalid canonical JSON"); }
+    }
+    private static Object immutable(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new TreeMap<>(); map.forEach((k, v) -> copy.put((String)k, immutable(v))); return Collections.unmodifiableMap(copy);
+        }
+        if (value instanceof List<?> list) return list.stream().map(CanonicalJson::immutable).toList();
+        return value;
     }
     private static void write(Object value, StringBuilder text, int depth) {
         if (depth > 64 || text.length() > MAX_BYTES) throw new IllegalArgumentException("canonical content limit exceeded");
